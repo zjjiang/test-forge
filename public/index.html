@@ -108,6 +108,8 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .lb-x{position:fixed;top:12px;right:20px;font-size:24px;background:none;border:0;color:#fff;cursor:pointer}
 .lb-nav{position:fixed;top:50%;transform:translateY(-50%);font-size:32px;line-height:1;width:46px;height:46px;background:rgba(255,255,255,.14);border:0;color:#fff;cursor:pointer;border-radius:50%}
 .lb-nav:hover{background:rgba(255,255,255,.28)}
+.lb-nav:disabled{opacity:.25;cursor:default}
+.lb-nav:disabled:hover{background:rgba(255,255,255,.14)}
 .lb-prev{left:18px}.lb-next{right:18px}
 .warn{background:var(--warn-bg);border:1px solid var(--warn-line);padding:8px 10px;border-radius:4px;font-size:13px}
 .err{color:var(--bad);font-size:13px;margin-top:6px;min-height:1em}
@@ -403,11 +405,16 @@ document.addEventListener('keydown', function (e) {
 });
 function lbOpen(i) { S.lb = i; drawLb(); lb.hidden = false; }
 function closeLb() { lb.hidden = true; S.lb = null; }
-function lbGo(d) { if (S.lb == null || !S.shots.length) return; S.lb = (S.lb + d + S.shots.length) % S.shots.length; drawLb(); }
+function lbGo(d) {
+  if (S.lb == null || !S.shots.length) return;
+  var next = S.lb + d;
+  if (next < 0 || next >= S.shots.length) return; // 到头就停，不循环
+  S.lb = next; drawLb();
+}
 function drawLb() {
   var s = S.shots[S.lb];
   lb.innerHTML = '<button class="lb-x" title="关闭 (Esc)" onclick="closeLb()">×</button>'
-    + (S.shots.length > 1 ? '<button class="lb-nav lb-prev" title="上一张 (←)" onclick="lbGo(-1)">‹</button><button class="lb-nav lb-next" title="下一张 (→)" onclick="lbGo(1)">›</button>' : '')
+    + (S.shots.length > 1 ? '<button class="lb-nav lb-prev" title="上一张 (←)" onclick="lbGo(-1)"' + (S.lb === 0 ? ' disabled' : '') + '>‹</button><button class="lb-nav lb-next" title="下一张 (→)" onclick="lbGo(1)"' + (S.lb === S.shots.length - 1 ? ' disabled' : '') + '>›</button>' : '')
     + '<figure><img src="' + esc(s.src) + '" alt=""><figcaption>' + esc(s.caption) + ' · ' + (S.lb + 1) + ' / ' + S.shots.length + '</figcaption></figure>';
 }
 
