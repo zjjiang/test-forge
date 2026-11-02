@@ -1,7 +1,9 @@
 import type { Store } from "../store/db.js";
 import { aiSettingsEnv } from "../store/settings.js";
 
-export const DEFAULT_AI_FAMILY = "glm-v";
+export const DEFAULT_AI_FAMILY = "anthropic";
+export const DEFAULT_AI_BASE_URL = "https://open.bigmodel.cn/api/anthropic";
+export const DEFAULT_AI_MODEL = "glm-5.3";
 
 export interface AiConfig {
   family: string;
@@ -47,6 +49,11 @@ export function aiConfigFrom(env: Record<string, string | undefined>): AiConfig 
   };
 }
 
+/** anthropic 协议族（智谱 /api/anthropic 兼容端点）走 /v1/messages，其余走 OpenAI /chat/completions。 */
+function isAnthropicProtocol(cfg: AiConfig): boolean {
+  return /^(anthropic|claude)/i.test(cfg.family) || /\/api\/anthropic/.test(cfg.baseUrl);
+}
+
 /** 直连模型网关发一次真实补全请求，验证连通性；不启动浏览器。 */
 export async function testAi(
   cfg: AiConfig,
@@ -60,18 +67,25 @@ export async function testAi(
   ].filter((x): x is string => typeof x === "string");
   if (missing.length > 0) return { ok: false, ms: 0, reply: "配置不完整：缺 " + missing.join("、") };
 
-  const url = cfg.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+  const anthropic = isAnthropicProtocol(cfg);
+  const base = cfg.baseUrl.replace(/\/+$/, "");
+  const url = anthropic ? base + "/v1/messages" : base + "/chat/completions";
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  let payload: unknown;
+  if (anthropic) {
+    headers["x-api-key"] = cfg.apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    payload = { model: cfg.model, max_tokens: 16, messages: [{ role: "user", content: "只回复两个字：正常" }] };
+  } else {
+    headers.authorization = "Bearer " + cfg.apiKey;
+    payload = { model: cfg.model, messages: [{ role: "user", content: "只回复两个字：正常" }], temperature: 0, max_tokens: 16 };
+  }
   const started = Date.now();
   try {
     const res = await fetchImpl(url, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer " + cfg.apiKey },
-      body: JSON.stringify({
-        model: cfg.model,
-        messages: [{ role: "user", content: "只回复两个字：正常" }],
-        temperature: 0,
-        max_tokens: 16,
-      }),
+      headers,
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(timeoutMs),
     });
     const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
@@ -79,10 +93,23 @@ export async function testAi(
       const detail = JSON.stringify(body)?.slice(0, 300) ?? "";
       return { ok: false, ms: Date.now() - started, reply: `HTTP ${res.status} ${detail}` };
     }
-    const choices = body?.choices as { message?: { content?: unknown } }[] | undefined;
-    const reply = String(choices?.[0]?.message?.content ?? "").trim();
+    const reply = anthropic ? anthropicReply(body) : openaiReply(body);
     return { ok: true, ms: Date.now() - started, reply: reply === "" ? "(空回复)" : reply.slice(0, 200) };
   } catch (e) {
     return { ok: false, ms: Date.now() - started, reply: e instanceof Error ? e.message : String(e) };
   }
+}
+
+function openaiReply(body: Record<string, unknown> | null): string {
+  const choices = body?.choices as { message?: { content?: unknown } }[] | undefined;
+  return String(choices?.[0]?.message?.content ?? "").trim();
+}
+
+function anthropicReply(body: Record<string, unknown> | null): string {
+  const content = body?.content as { type?: unknown; text?: unknown }[] | undefined;
+  return (content ?? [])
+    .filter((b) => b.type === "text")
+    .map((b) => String(b.text ?? ""))
+    .join("")
+    .trim();
 }

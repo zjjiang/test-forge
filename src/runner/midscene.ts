@@ -18,7 +18,7 @@ export async function createMidsceneDriver(env: NodeJS.ProcessEnv = process.env)
 		MIDSCENE_MODEL_NAME: env.MIDSCENE_MODEL_NAME ?? '',
 		MIDSCENE_MODEL_BASE_URL: env.MIDSCENE_MODEL_BASE_URL ?? '',
 		MIDSCENE_MODEL_API_KEY: env.MIDSCENE_MODEL_API_KEY ?? '',
-		MIDSCENE_MODEL_FAMILY: env.MIDSCENE_MODEL_FAMILY ?? 'glm-v',
+		MIDSCENE_MODEL_FAMILY: env.MIDSCENE_MODEL_FAMILY ?? 'anthropic',
 	});
 	const agents = new WeakMap<Page, AgentLike>();
 	const agentFor = (page: Page): AgentLike => {

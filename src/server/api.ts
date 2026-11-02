@@ -210,7 +210,7 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
     return envelope(() => {
       const s = (k: string): string => String(b[k] ?? "").trim();
       if (b.family !== undefined)
-        setSetting(store, "MIDSCENE_MODEL_FAMILY", s("family") || "glm-v");
+        setSetting(store, "MIDSCENE_MODEL_FAMILY", s("family") || "anthropic");
       if (b.model !== undefined)
         setSetting(store, "MIDSCENE_MODEL_NAME", s("model"));
       if (b.baseUrl !== undefined)

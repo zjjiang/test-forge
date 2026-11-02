@@ -65,7 +65,7 @@ export function aiSettingsView(store: Store): AiSettingsView {
   const updatedAt = rows.map((r) => String(r.updated_at)).sort().at(-1) ?? "";
   return {
     configured: model !== "" && baseUrl !== "" && apiKey !== "",
-    family: env.MIDSCENE_MODEL_FAMILY ?? "glm-v",
+    family: env.MIDSCENE_MODEL_FAMILY ?? "anthropic",
     model,
     baseUrl,
     hasApiKey: apiKey !== "",
