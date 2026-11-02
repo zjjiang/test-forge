@@ -32,10 +32,10 @@ body{margin:0;font:14px/1.55 var(--f-body);color:var(--fg);background:var(--bg);
 .app.solo main{max-width:none;padding:0 0 40px}
 th,td{vertical-align:middle !important}
 td .b{display:inline-block}
-.shots img{max-width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
-.shots figure{margin:0}
-.shots figcaption{font-size:12px;margin-top:4px;overflow-wrap:anywhere}
-.shots figcaption .mut{font-size:11px;margin-top:1px}
+.flow img{max-width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
+.flow figure{margin:0}
+.flow figcaption{font-size:12px;margin-top:4px;overflow-wrap:anywhere}
+.flow figcaption .mut{font-size:11px;margin-top:1px}
 .app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 aside{background:var(--card);border-right:1px solid var(--line);padding-block:18px;padding-left:env(safe-area-inset-left,0px);position:sticky;top:0;align-self:start;min-height:100vh}
 aside .back{display:block;padding:4px 16px 14px;color:var(--pri);cursor:pointer;font-size:13px}
@@ -92,8 +92,11 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .tag{font-size:11px;padding:0 6px;border-radius:3px;border:1px solid}
 .tag.det{color:var(--ok);border-color:var(--ok)}.tag.ai{color:var(--rev);border-color:var(--rev)}
 .st.on{background:var(--pri-soft);border-color:var(--pri)}
-.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
-.shots figcaption b{margin-right:6px}
+.flow{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start}
+.flow .srow{grid-column:1/-1;font-size:12px;display:flex;gap:8px;align-items:baseline;border-bottom:1px dashed var(--line);padding:3px 2px}
+.flow .srow .mut{margin-left:auto;white-space:nowrap}
+.flow .srow b{white-space:nowrap}
+.flow figcaption b{margin-right:6px}
 .shot{aspect-ratio:16/10;max-width:100%;background:repeating-linear-gradient(45deg,var(--stripe-a),var(--stripe-a) 10px,var(--stripe-b) 10px,var(--stripe-b) 20px);border:1px solid var(--line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--mut);font:12px var(--f-mono)}
 .att{font:12px var(--f-mono);margin-top:4px}
 #lb{position:fixed;inset:0;background:rgba(10,14,22,.86);display:flex;align-items:center;justify-content:center;z-index:50}
@@ -116,7 +119,7 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
  aside nav a{border-left:0;border-bottom:3px solid transparent;white-space:nowrap;gap:6px}
  aside nav a.on{border-bottom-color:var(--pri)}
  .pcard dl{grid-template-columns:repeat(2,minmax(0,1fr))}
- .shots,.fgrid{grid-template-columns:1fr}
+ .flow,.fgrid{grid-template-columns:1fr}
  .pgrid{grid-template-columns:1fr}
 }
 
@@ -125,10 +128,10 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .app.solo main{max-width:none;padding:0 0 40px}
 th,td{vertical-align:middle !important}
 td .b{display:inline-block}
-.shots img{max-width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
-.shots figure{margin:0}
-.shots figcaption{font-size:12px;margin-top:4px;overflow-wrap:anywhere}
-.shots figcaption .mut{font-size:11px;margin-top:1px}
+.flow img{max-width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
+.flow figure{margin:0}
+.flow figcaption{font-size:12px;margin-top:4px;overflow-wrap:anywhere}
+.flow figcaption .mut{font-size:11px;margin-top:1px}
 .app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 </style></head><body>
 <div class="app" id="app"><aside id="side" hidden></aside><main id="main"></main></div>
@@ -346,16 +349,8 @@ async function viewRun() {
   var det = 0, ai = 0;
   steps.forEach(function (s) { (s.assertions || []).forEach(function (a) { if (a.kind === 'det') det++; else ai++; }); });
   var base = '/api/projects/' + S.p + '/runs/' + S.run + '/files/';
-  /* 灯箱序列 = 全 run 截图，按步骤顺序 */
+  /* 灯箱序列 = 全 run 截图，按步骤顺序（渲染时同步建） */
   S.shots = [];
-  var seq = [];
-  steps.forEach(function (st, si) {
-    (st.shots || []).forEach(function (f) {
-      var label = '步骤 ' + (si + 1) + ' ' + st.stepId + (st.expect && st.expect !== st.stepId ? ' — ' + st.expect : '');
-      S.shots.push({ src: base + f, caption: label + ' · ' + f });
-      seq.push({ st: st, si: si, f: f, label: label });
-    });
-  });
   var h = '<div class="crumb"><a onclick="home()">首页</a> / <a onclick="openProject(\'' + S.p + '\')">' + esc(S.p) + '</a> / Run ' + esc(run.id) + '</div>';
   h += '<h2>' + esc(run.scenarioName) + ' ' + badge(run.status) + '</h2>';
   h += '<div class="mut" style="margin-bottom:10px">run <code>' + esc(run.id) + '</code> · 耗时 ' + fmtMs(run.durationMs) + ' · 断言（确定性/AI）' + det + ' / ' + ai + ' · 触发 ' + esc(run.triggeredBy || '—') + ' · ' + esc((run.startedAt || '').slice(5, 16).replace('T', ' ')) + '</div>';
@@ -366,13 +361,24 @@ async function viewRun() {
       + bad.map(function (st) { return '<b>' + esc(st.stepId) + '</b>' + (st.error ? '（' + esc(st.error.slice(0, 90)) + '）' : ''); }).join('；')
       + '</div>';
   }
-  h += '<div class="shots">';
-  if (!seq.length) h += '<span class="mut">（本次执行没有截图）</span>';
-  seq.forEach(function (it, n) {
-    h += '<figure><img src="' + base + esc(it.f) + '" loading="lazy" style="max-width:100%;cursor:zoom-in" onclick="lbOpen(' + n + ')" title="点击放大">'
-      + '<figcaption><b>' + esc(it.st.stepId) + '</b>' + badge(it.st.status)
-      + (it.st.expect && it.st.expect !== it.st.stepId ? '<div>' + esc(it.st.expect) + '</div>' : '')
-      + '<div class="mut">' + esc(it.f) + '</div></figcaption></figure>';
+  h += '<div class="flow">';
+  if (!steps.length) h += '<span class="mut">（本次执行没有步骤）</span>';
+  steps.forEach(function (st, si) {
+    var shots = st.shots || [];
+    var cap = '<b>' + (si + 1) + '. ' + esc(st.stepId) + '</b>' + badge(st.status)
+      + (st.expect && st.expect !== st.stepId ? '<span class="mut">' + esc(st.expect) + '</span>' : '');
+    if (!shots.length) {
+      /* 没截图的步骤：一行细条，不跳步 */
+      h += '<div class="srow">' + cap + '<span class="mut">' + (st.ms || 0) + 'ms · 无截图</span></div>';
+      return;
+    }
+    shots.forEach(function (f) {
+      var label = '步骤 ' + (si + 1) + ' ' + st.stepId + (st.expect && st.expect !== st.stepId ? ' — ' + st.expect : '');
+      var idx = S.shots.length;
+      S.shots.push({ src: base + f, caption: label + ' · ' + f });
+      h += '<figure><img src="' + base + esc(f) + '" loading="lazy" style="max-width:100%;cursor:zoom-in" onclick="lbOpen(' + idx + ')" title="点击放大">'
+        + '<figcaption>' + cap + '<div class="mut">' + esc(f) + '</div></figcaption></figure>';
+    });
   });
   h += '</div>';
   return { side: side({ name: run.scenarioName, baseUrl: '' }, {}), body: h };
