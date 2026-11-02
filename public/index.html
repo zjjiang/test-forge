@@ -99,6 +99,8 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .shots{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .shot{aspect-ratio:16/10;max-width:100%;background:repeating-linear-gradient(45deg,var(--stripe-a),var(--stripe-a) 10px,var(--stripe-b) 10px,var(--stripe-b) 20px);border:1px solid var(--line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--mut);font:12px var(--f-mono)}
 .att{font:12px var(--f-mono);margin-top:4px}
+.lastrun{cursor:pointer}
+.lastrun:hover .b{outline:2px solid var(--pri);outline-offset:1px}
 .warn{background:var(--warn-bg);border:1px solid var(--warn-line);padding:8px 10px;border-radius:4px;font-size:13px}
 .err{color:var(--bad);font-size:13px;margin-top:6px;min-height:1em}
 @media (max-width:760px){
@@ -201,16 +203,26 @@ function side(p, counts) {
   return h + '</nav>';
 }
 async function viewProject() {
-  var p = await api('/api/projects/' + S.p);
+  var pid = S.p;
+  var p = await api('/api/projects/' + pid);
   var tab = S.tab;
-  var counts = { scenarios: (CACHE.scenarios[S.p] || []).length, runs: (CACHE.runs[S.p] || []).length, vars: (CACHE.vars[S.p] || []).length, guards: p.blockedRoutes.length };
+  /* 计数并行拉全，侧栏不再显示进页前的假 0 */
+  var results = await Promise.all([
+    api('/api/projects/' + pid + '/scenarios'),
+    api('/api/projects/' + pid + '/runs?limit=50'),
+    api('/api/projects/' + pid + '/vars'),
+  ]);
+  CACHE.scenarios[pid] = results[0];
+  CACHE.runs[pid] = results[1];
+  CACHE.vars[pid] = results[2];
+  var counts = { scenarios: results[0].length, runs: results[1].length, vars: results[2].length, guards: p.blockedRoutes.length };
   if (tab === 'scenarios') return { side: side(p, counts), body: await tabScenarios(p, counts) };
   if (tab === 'runs') return { side: side(p, counts), body: await tabRuns(p, counts) };
   if (tab === 'vars') return { side: side(p, counts), body: await tabVars(p, counts) };
   return { side: side(p, counts), body: tabGuards(p) };
 }
 async function tabScenarios(p, counts) {
-  var items = CACHE.scenarios[S.p] = await api('/api/projects/' + S.p + '/scenarios');
+  var items = CACHE.scenarios[S.p];
   var h = '<div class="card"><div class="row"><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引；改动后刷新本页。</span></div><table><tr><th>场景</th><th>角色</th><th>步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
   if (!items.length) h += '<tr><td colspan="6" class="empty">还没有场景。在 scenarios/' + esc(p.id) + '/ 下放 YAML，或让 Claude Code 按需求生成。</td></tr>';
   items.forEach(function (s) {
@@ -220,14 +232,14 @@ async function tabScenarios(p, counts) {
     }
     var last = s.lastRun;
     h += '<tr><td><b title="' + esc(s.file) + '">' + esc(s.name) + '</b></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
-      + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
+      + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>'
+      + (last ? '<span class="lastrun" title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">' + badge(last.status) + '</span>' : '—') + '</td>'
       + '<td><button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
   });
   return h + '</table></div>';
 }
 async function tabRuns(p, counts) {
-  var q = '/api/projects/' + S.p + '/runs?limit=50' + (S.filter ? '&scenario=' + encodeURIComponent(S.filter) : '');
-  var rs = CACHE.runs[S.p] = await api(q);
+  var rs = CACHE.runs[S.p].filter(function (r) { return !S.filter || r.scenarioId === S.filter; });
   var h = '<div class="card"><div class="row"><span>' + (S.filter ? '场景 <b>' + esc(S.filter) + '</b> 的执行记录 <button class="link" onclick="go({filter:null})">清除筛选</button>' : '全部执行记录') + '</span></div><table><tr><th>Run ID</th><th>场景</th><th>状态</th><th>耗时</th><th>触发</th><th>时间</th></tr>';
   if (!rs.length) h += '<tr><td colspan="6" class="empty">还没有执行记录。</td></tr>';
   rs.forEach(function (r) {
@@ -237,7 +249,7 @@ async function tabRuns(p, counts) {
 }
 
 async function tabVars(p, counts) {
-  var vars = CACHE.vars[S.p] = await api('/api/projects/' + S.p + '/vars');
+  var vars = CACHE.vars[S.p];
   var h = '<div class="card"><div class="row"><div><b>Global 环境变量</b><div class="mut">项目内所有场景可用，场景里用 <code>${var:NAME}</code> 引用。优先级：项目 global &lt; 场景 variables &lt; --var。secret 加密存储，快照和日志一律脱敏。</div></div></div>';
   h += '<table><tr><th style="width:22%">Key</th><th style="width:30%">Value</th><th>Secret</th><th>说明</th><th style="width:110px"></th></tr>';
   vars.forEach(function (v, i) {
