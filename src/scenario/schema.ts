@@ -133,31 +133,33 @@ const stepSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+export const actorSchema = z.object({
+  description: z.string().max(200).optional(),
+  cookies: z.array(cookie).max(50).optional(),
+  localStorage: z.record(z.string(), z.string()).optional(),
+  sessionStorage: z.record(z.string(), z.string()).optional(),
+  /** 挂到 window.__TEST_CONTEXT__ 的业务上下文 */
+  initVars: z.record(z.string(), z.unknown()).optional(),
+  clock: z.object({ now: z.string().min(4) }).optional(),
+  mocks: z.array(mock).max(100).optional(),
+});
+
+export type ActorConfig = z.infer<typeof actorSchema>;
+
 export const scenarioSchema = z
   .object({
     name: z.string().min(1).max(100),
     description: z.string().max(500).optional(),
     version: z.number().int().min(1).default(1),
-    baseUrl: z.url(),
+    /** 缺省时用项目配置的 baseUrl；场景里写baseUrl 可覆盖 */
+    baseUrl: z.url().optional(),
     /** 缺少的 env 一律 skip 场景，例如 XK_COOKIE */
     requires: z.object({ env: z.array(z.string().min(1)).max(20) }).optional(),
     variables: z
       .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
       .optional(),
     actors: z
-      .record(
-        slugKey,
-        z.object({
-          description: z.string().max(200).optional(),
-          cookies: z.array(cookie).max(50).optional(),
-          localStorage: z.record(z.string(), z.string()).optional(),
-          sessionStorage: z.record(z.string(), z.string()).optional(),
-          /** 挂到 window.__TEST_CONTEXT__ 的业务上下文 */
-          initVars: z.record(z.string(), z.unknown()).optional(),
-          clock: z.object({ now: z.string().min(4) }).optional(),
-          mocks: z.array(mock).max(100).optional(),
-        }),
-      )
+      .record(slugKey, actorSchema)
       .refine((a) => Object.keys(a).length >= 1, {
         message: "至少要有一个 actor",
       }),
