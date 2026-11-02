@@ -95,6 +95,7 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .stat b{display:block;font:700 22px/1.3 var(--f-display)}
 .steps{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px}
 .st{padding:8px 10px;border-radius:4px;cursor:pointer;border:1px solid transparent}
+.stline{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .st.on{background:var(--pri-soft);border-color:var(--pri)}
 .shots{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .shot{aspect-ratio:16/10;max-width:100%;background:repeating-linear-gradient(45deg,var(--stripe-a),var(--stripe-a) 10px,var(--stripe-b) 10px,var(--stripe-b) 20px);border:1px solid var(--line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--mut);font:12px var(--f-mono)}
@@ -314,7 +315,7 @@ async function viewRun() {
   var st = steps[S.step] || { id: '—', type: '', actor: '', expect: '', attempts: [], assertions: [], shots: [] };
   h += '<div class="steps"><div class="card" style="padding:8px">';
   steps.forEach(function (x, i) {
-    h += '<div class="st ' + (i === S.step ? 'on' : '') + '" onclick="go({step:' + i + '})"><span class="mut">' + String(i + 1).padStart(2, '0') + '</span> <b>' + esc(x.stepId) + '</b> ' + badge(x.status) + '<div class="mut">[' + esc(x.actor) + '] ' + esc(x.expect || '') + '</div></div>';
+    h += '<div class="st ' + (i === S.step ? 'on' : '') + '" onclick="go({step:' + i + '})"><div class="stline"><span><span class="mut">' + String(i + 1).padStart(2, '0') + '</span> <b>' + esc(x.stepId) + '</b></span>' + badge(x.status) + '</div><div class="mut">[' + esc(x.actor) + '] ' + esc(x.expect || '') + '</div></div>';
   });
   h += '</div><div><div class="card"><div class="row"><b>' + esc(st.stepId) + '</b><span class="mut">' + esc(st.type) + ' · 角色 ' + esc(st.actor) + ' · ' + fmtMs(st.ms || 0) + '</span></div>';
   if (st.expect) h += '<div>验收点：' + esc(st.expect) + '</div>';
