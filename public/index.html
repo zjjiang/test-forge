@@ -145,7 +145,7 @@ async function api(path, opts) {
 }
 const j = (method, data) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
 
-var S = { view: 'home', p: null, tab: 'scenarios', run: null, step: 0, reveal: {}, edit: null, filter: null, creating: false, poll: null };
+var S = { view: 'home', p: null, tab: 'scenarios', run: null, step: 0, stepPage: 0, reveal: {}, edit: null, filter: null, creating: false, poll: null };
 function go(o) { Object.assign(S, o); if (S.poll) { clearInterval(S.poll); S.poll = null; } if (typeof lb !== 'undefined' && !lb.hidden) closeLb(); render(); }
 
 var CACHE = { projects: null, project: {}, vars: {}, scenarios: {}, runs: {}, run: {} };
@@ -335,7 +335,7 @@ async function addGuard() {
 }
 
 /* ---------- Run 详情 ---------- */
-function openRun(pid, runId) { go({ view: 'run', p: pid, run: runId, step: 0 }); }
+function openRun(pid, runId) { go({ view: 'run', p: pid, run: runId, step: 0, stepPage: 0 }); }
 async function viewRun() {
   var data = await api('/api/projects/' + S.p + '/runs/' + S.run);
   var run = data.run, summary = data.summary;
@@ -357,8 +357,16 @@ async function viewRun() {
     + '<a href="/api/projects/' + S.p + '/runs/' + S.run + '/files/trace-' + esc(steps.length && steps[0].actor ? steps[0].actor : 'user') + '.zip"><button>trace.zip</button></a></div>';
   if (S.step >= steps.length) S.step = Math.max(0, steps.length - 1);
   var st = steps[S.step] || { id: '—', type: '', actor: '', expect: '', attempts: [], assertions: [], shots: [] };
+  var PER = 20;
+  var totalPages = Math.max(1, Math.ceil(steps.length / PER));
+  S.stepPage = Math.max(0, Math.min(S.stepPage || 0, totalPages - 1));
+  var pageStart = S.stepPage * PER;
   h += '<div class="steps"><div class="card" style="padding:8px">';
-  steps.forEach(function (x, i) {
+  if (totalPages > 1) {
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 4px 8px"><button' + (S.stepPage > 0 ? '' : ' disabled style="opacity:.4"') + ' onclick="go({stepPage:S.stepPage-1})">‹ 上一页</button><span class="mut">' + (pageStart + 1) + '–' + Math.min(pageStart + PER, steps.length) + ' / ' + steps.length + '</span><button' + (S.stepPage < totalPages - 1 ? '' : ' disabled style="opacity:.4"') + ' onclick="go({stepPage:S.stepPage+1})">下一页 ›</button></div>';
+  }
+  steps.slice(pageStart, pageStart + PER).forEach(function (x, n) {
+    var i = pageStart + n;
     h += '<div class="st ' + (i === S.step ? 'on' : '') + '" onclick="go({step:' + i + '})"><div class="stline"><span><span class="mut">' + String(i + 1).padStart(2, '0') + '</span> <b>' + esc(x.stepId) + '</b></span>' + badge(x.status) + '</div><div class="mut">[' + esc(x.actor) + '] ' + esc(x.expect || '') + '</div></div>';
   });
   h += '</div><div><div class="card"><div class="row"><b>' + esc(st.stepId) + '</b><span class="mut">' + esc(st.type) + ' · 角色 ' + esc(st.actor) + ' · ' + fmtMs(st.ms || 0) + '</span></div>';
