@@ -58,6 +58,8 @@ const stepCommon = {
   onFail: z.enum(["fail", "warn"]).default("fail"),
   /** 覆盖场景级 stepTimeoutMs（navigate/wait/js_assert 等长步骤用） */
   timeoutMs: z.number().int().min(100).max(600_000).optional(),
+  /** 条件执行：page.evaluate 的脚本，假值时跳过本步（幂等收尾用） */
+  when: z.string().min(1).optional(),
 };
 
 const stepSchema = z.discriminatedUnion("type", [
@@ -150,6 +152,8 @@ const stepSchema = z.discriminatedUnion("type", [
     selector: z.string().min(1),
     /** 取属性值；缺省取 innerText */
     attr: z.string().optional(),
+    /** 值是 JSON 时取指定字段（如 data-shop 里的 id） */
+    jsonField: z.string().optional(),
     /** 存入 run 内变量，后续步骤用 ${var:NAME} 引用 */
     into: slugKey,
   }),

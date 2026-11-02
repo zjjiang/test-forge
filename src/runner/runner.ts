@@ -200,11 +200,13 @@ export async function runScenario(
         },
         downloadPath: (suggested) => evidence.filePath("downloads", suggested),
       });
-      const status: StepStatus = result.ok
-        ? "passed"
-        : step.onFail === "warn"
-          ? "warned"
-          : "failed";
+      const status: StepStatus = result.skipped === true
+        ? "skipped"
+        : result.ok
+          ? "passed"
+          : step.onFail === "warn"
+            ? "warned"
+            : "failed";
       stepResults.push({
         index: i,
         stepId: step.id ?? `${step.type}-${i + 1}`,

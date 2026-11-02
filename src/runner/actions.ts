@@ -24,6 +24,8 @@ export interface StepCtx {
 
 export interface StepOutcome {
   ok: boolean;
+  /** when 条件为假时跳过：不判成败 */
+  skipped?: boolean;
   error: string;
   attempts: AttemptRecord[];
   assertions: AssertionRecord[];
@@ -145,13 +147,28 @@ export async function freezeAndShot(page: Page, filePath: string): Promise<boole
 export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome> {
   const out: StepOutcome = { ok: true, error: "", attempts: [], assertions: [] };
   const page = ctx.runtime.page;
+  if (step.when !== undefined) {
+    let ok = false;
+    try {
+      ok = Boolean(await page.evaluate(step.when));
+    } catch (e) {
+      out.ok = false;
+      out.error = `when 条件执行失败: ${e instanceof Error ? e.message : String(e)}`;
+      return out;
+    }
+    if (!ok) {
+      out.skipped = true;
+      record(out, step, "det", `when: ${step.when.slice(0, 100)}`, "条件为假，跳过", true);
+      return out;
+    }
+  }
   const t0 = Date.now();
   const attempt = async (n: number): Promise<boolean> => {
     const a0 = Date.now();
     try {
       switch (step.type) {
         case "navigate": {
-          await page.goto(new URL(step.url, ctx.baseUrl).href, { waitUntil: step.waitUntil ?? "load", timeout: ctx.stepTimeoutMs });
+          await page.goto(new URL(step.url, ctx.baseUrl).href, { waitUntil: step.waitUntil ?? "load", timeout: timeoutMs(step, ctx) });
           record(out, step, "det", `打开 ${step.url}`, page.url(), true);
           return true;
         }
@@ -173,7 +190,7 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
         }
         case "wait": {
           if (step.ms !== undefined) await page.waitForTimeout(step.ms);
-          if (step.selector !== undefined) await page.waitForSelector(step.selector, { timeout: ctx.stepTimeoutMs });
+          if (step.selector !== undefined) await page.waitForSelector(step.selector, { timeout: timeoutMs(step, ctx) });
           record(out, step, "det", step.selector ?? `${step.ms}ms`, "waited", true);
           return true;
         }
@@ -219,9 +236,20 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
         case "extract": {
           const loc = page.locator(step.selector).first();
           await loc.waitFor({ state: "attached", timeout: timeoutMs(step, ctx) });
-          const value = step.attr !== undefined
+          const raw = step.attr !== undefined
             ? (await loc.getAttribute(step.attr, { timeout: timeoutMs(step, ctx) })) ?? ""
             : (await loc.innerText({ timeout: timeoutMs(step, ctx) })).trim();
+          let value = raw;
+          if (step.jsonField !== undefined) {
+            try {
+              const parsedJson: unknown = JSON.parse(raw);
+              value = String((parsedJson as Record<string, unknown>)?.[step.jsonField]);
+            } catch {
+              const msg = `extract jsonField=${step.jsonField}：值不是合法 JSON「${raw.slice(0, 120)}」`;
+              record(out, step, "det", `提取 ${step.selector} → ${step.into}`, msg, false);
+              return false;
+            }
+          }
           ctx.setVar(step.into, value);
           record(out, step, "det", `提取 ${step.selector} → ${step.into}`, value, true);
           return true;
