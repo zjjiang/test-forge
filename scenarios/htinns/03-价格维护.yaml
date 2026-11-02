@@ -5,6 +5,7 @@
 name: 价格维护
 description: 对应用例 P01-P09、PS01-PS03；P07 为已知 bug 的缺陷证据（onFail warn）
 version: 1
+trace: false
 requires:
   env: []
 variables:
@@ -109,10 +110,16 @@ steps:
     selector: '.tbl'
     timeoutMs: 90000
     expect: 大页可交互
+  # 2 万行 DOM 极耗内存：立即导航离开巨页再截图（原仓库同款防崩策略）
+  - id: p09-leave
+    as: admin
+    type: navigate
+    url: /maintain/wf
+    expect: 先离开巨页
   - id: p09-shot
     as: admin
     type: screenshot
-    name: p09-大店工作流
+    name: p09-大店耗时参照页
   # ---------- P03 筛选执行页 ----------
   - id: p03-open
     as: admin

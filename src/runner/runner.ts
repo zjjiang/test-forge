@@ -169,11 +169,13 @@ export async function runScenario(
         blockedRoutes: scenario.guards?.blockedRoutes ?? [],
         log,
       });
-      await rt.context.tracing.start({
-        screenshots: true,
-        snapshots: true,
-        sources: false,
-      });
+      if (scenario.trace !== false) {
+        await rt.context.tracing.start({
+          screenshots: true,
+          snapshots: true,
+          sources: false,
+        });
+      }
       runtimes.set(name, rt);
     }
 
@@ -258,9 +260,11 @@ export async function runScenario(
   } finally {
     for (const [name, rt] of runtimes) {
       try {
-        await rt.context.tracing.stop({
-          path: path.join(evidence.dir, `trace-${name}.zip`),
-        });
+        if (scenario.trace !== false) {
+          await rt.context.tracing.stop({
+            path: path.join(evidence.dir, `trace-${name}.zip`),
+          });
+        }
         await rt.context.close();
       } catch (e) {
         log(

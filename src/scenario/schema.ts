@@ -240,6 +240,8 @@ export const scenarioSchema = z
       .optional(),
     timeoutMs: z.number().int().min(1_000).max(3_600_000).optional(),
     stepTimeoutMs: z.number().int().min(1_000).max(600_000).optional(),
+    /** 关闭 Playwright trace（超大 DOM 页面会拖垮浏览器内存） */
+    trace: z.boolean().optional(),
     steps: z.array(stepSchema).min(1),
     teardown: z.array(stepSchema).max(50).optional(),
   })
