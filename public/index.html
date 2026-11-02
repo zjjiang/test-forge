@@ -190,10 +190,10 @@ async function createProject() {
 }
 
 /* ---------- 项目内 ---------- */
-var TABS = [['scenarios', '场景'], ['runs', '执行历史'], ['vars', '环境变量'], ['guards', '安全护栏']];
+var TABS = [['scenarios', '场景'], ['vars', '环境变量'], ['guards', '安全护栏']];
 function openProject(id) { go({ view: 'project', p: id, tab: 'scenarios', filter: null, edit: null, reveal: {} }); }
 function side(p, counts) {
-  var cur = S.view === 'run' ? 'runs' : S.tab;
+  var cur = S.view === 'run' ? 'scenarios' : S.tab;
   var h = '<a class="back" onclick="home()">← 全部项目</a><div class="pname">' + esc(p.name) + '</div><div class="purl">' + esc(p.baseUrl) + '</div><nav>';
   TABS.forEach(function (t) {
     h += '<a class="' + (cur === t[0] ? 'on' : '') + '" onclick="go({view:\'project\',tab:\'' + t[0] + '\',filter:null,edit:null})">' + t[1] + '<span class="cnt">' + (counts[t[0]] || 0) + '</span></a>';
@@ -213,15 +213,14 @@ async function viewProject() {
   CACHE.scenarios[pid] = results[0];
   CACHE.runs[pid] = results[1];
   CACHE.vars[pid] = results[2];
-  var counts = { scenarios: results[0].length, runs: results[1].length, vars: results[2].length, guards: p.blockedRoutes.length };
+  var counts = { scenarios: results[0].length, vars: results[2].length, guards: p.blockedRoutes.length };
   if (tab === 'scenarios') return { side: side(p, counts), body: await tabScenarios(p, counts) };
-  if (tab === 'runs') return { side: side(p, counts), body: await tabRuns(p, counts) };
   if (tab === 'vars') return { side: side(p, counts), body: await tabVars(p, counts) };
   return { side: side(p, counts), body: tabGuards(p) };
 }
 async function tabScenarios(p, counts) {
   var items = CACHE.scenarios[S.p];
-  var h = '<div class="card"><div class="row"><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引；改动后刷新本页。</span></div><table><tr><th>场景</th><th>角色</th><th>步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
+  var h = '<div class="card"><div class="row"><b>场景</b><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引；改动后刷新本页。</span></div><table><tr><th>场景</th><th>角色</th><th>步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
   if (!items.length) h += '<tr><td colspan="6" class="empty">还没有场景。在 scenarios/' + esc(p.id) + '/ 下放 YAML，或让 Claude Code 按需求生成。</td></tr>';
   items.forEach(function (s) {
     if (!s.valid) {
@@ -233,15 +232,11 @@ async function tabScenarios(p, counts) {
       + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
       + '<td>' + (last ? '<button title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">查看结果</button> ' : '')
       + '<button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
-      + '<td><button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
   });
-  return h + '</table></div>';
-}
-async function tabRuns(p, counts) {
-  var rs = CACHE.runs[S.p].filter(function (r) { return !S.filter || r.scenarioId === S.filter; });
-  var h = '<div class="card"><div class="row"><span>' + (S.filter ? '场景 <b>' + esc(S.filter) + '</b> 的执行记录 <button class="link" onclick="go({filter:null})">清除筛选</button>' : '全部执行记录') + '</span></div><table><tr><th>Run ID</th><th>场景</th><th>状态</th><th>耗时</th><th>触发</th><th>时间</th></tr>';
-  if (!rs.length) h += '<tr><td colspan="6" class="empty">还没有执行记录。</td></tr>';
-  rs.forEach(function (r) {
+  h += '</table></div>';
+  h += '<h3>执行记录</h3><div class="card"><table><tr><th>Run ID</th><th>场景</th><th>状态</th><th>耗时</th><th>触发</th><th>时间</th></tr>';
+  if (!CACHE.runs[S.p].length) h += '<tr><td colspan="6" class="empty">还没有执行记录。点上面的「运行」开始第一次执行。</td></tr>';
+  CACHE.runs[S.p].forEach(function (r) {
     h += '<tr class="click" onclick="openRun(\'' + p.id + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + fmtMs(r.durationMs) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc((r.startedAt || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
   });
   return h + '</table></div>';
