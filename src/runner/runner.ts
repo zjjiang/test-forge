@@ -95,7 +95,18 @@ export async function runScenario(
   }
 
   const snap = varSnapshot(store, opts.projectId);
+  const now = new Date();
+  const pad2 = (n: number): string => String(n).padStart(2, "0");
+  const mmdd = pad2(now.getMonth() + 1) + pad2(now.getDate());
+  const hms = pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds());
+  const builtins: Record<string, string> = {
+    RUN_DATE: `${now.getFullYear()}${mmdd}`,
+    RUN_TIME: hms,
+    RUN_STAMP: `${mmdd}-${hms}`,
+    RUN_STAMP_COMPACT: mmdd + hms,
+  };
   const vars: Record<string, unknown> = {
+    ...builtins,
     ...snap.values,
     ...(opts.scenario.variables ?? {}),
     ...(opts.varsOverride ?? {}),
@@ -107,7 +118,11 @@ export async function runScenario(
     ...snap.redacted,
     ...(opts.varsOverride ?? {}),
   });
-  const resolved = interpolateDeep(scenario, vars);
+  // extract 步骤写入的 run 内变量，每步执行时合并插值
+  let runtimeVars: Record<string, string> = {};
+  const stepVars = (): Record<string, unknown> => ({ ...vars, ...runtimeVars });
+  // actors/guards 先插值；steps 留到逐条执行时插（extract 的变量运行中才存在）
+  const resolvedActors = interpolateDeep(scenario.actors, vars);
   const baseUrl: string = scenario.baseUrl ?? "";
   evidence.writeJson("vars.json", {
     redacted: snap.redacted,
@@ -141,7 +156,7 @@ export async function runScenario(
       const rt = await openActor({
         browser,
         name,
-        actor: scenario.actors[name] ?? {},
+        actor: resolvedActors[name] ?? {},
         baseUrl: baseUrl,
         blockedRoutes: scenario.guards?.blockedRoutes ?? [],
         log,
@@ -168,7 +183,8 @@ export async function runScenario(
         return;
       }
       const stepShots: string[] = [];
-      const result = await executeStep(step, {
+      const inst = interpolateDeep(step, stepVars()) as Step;
+      const result = await executeStep(inst, {
         runtime,
         baseUrl: baseUrl,
         stepTimeoutMs,
@@ -179,6 +195,10 @@ export async function runScenario(
           await freezeAndShot(runtime.page, p);
           stepShots.push(path.relative(evidence.dir, p));
         },
+        setVar: (name, value) => {
+          runtimeVars = { ...runtimeVars, [name]: value };
+        },
+        downloadPath: (suggested) => evidence.filePath("downloads", suggested),
       });
       const status: StepStatus = result.ok
         ? "passed"
@@ -204,13 +224,13 @@ export async function runScenario(
           message: result.error,
         });
     };
-    mainCount = resolved.steps.length;
-    for (const [i, step] of resolved.steps.entries())
+    mainCount = scenario.steps.length;
+    for (const [i, step] of scenario.steps.entries())
       await runStep(step, i, false);
-    if (resolved.teardown !== undefined) {
+    if (scenario.teardown !== undefined) {
       log("TEARDOWN begin");
-      for (const [i, step] of resolved.teardown.entries()) {
-        await runStep(step, resolved.steps.length + i, true);
+      for (const [i, step] of scenario.teardown.entries()) {
+        await runStep(step, scenario.steps.length + i, true);
       }
     }
   } finally {

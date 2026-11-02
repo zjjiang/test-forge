@@ -158,3 +158,79 @@ describe("runner e2e", () => {
     expect(warned?.attempts.at(-1)?.ok).toBe(false);
   });
 });
+
+describe("runner 新步骤类型", () => {
+  it("select/hover/extract/http/js_assert/download/内置变量全链路", { timeout: 60000 }, async () => {
+    // 动态页面：select 联动、登录表单、CSV 下载
+    server.close();
+    await new Promise<void>((ok) => {
+      server = http.createServer((req, res) => {
+        if (req.url === "/hotels/export") {
+          res.writeHead(200, {
+            "content-type": "text/csv",
+            "content-disposition": 'attachment; filename="hotels_2026.csv"',
+          });
+          res.end("﻿酒店名称,城市\nE2E测试酒店,郑州\n");
+          return;
+        }
+        if (req.url === "/settings/shop/create" && req.method === "POST") {
+          let body = "";
+          req.on("data", (c) => { body += c; });
+          req.on("end", () => {
+            res.writeHead(403, { "content-type": "application/json" });
+            res.end(JSON.stringify({ code: -1, message: "forbidden" }));
+          });
+          return;
+        }
+        if (req.url?.startsWith("/goto?")) {
+          res.writeHead(200, { "content-type": "text/html" });
+          res.end(`<!doctype html><html><body><b id="who">${decodeURIComponent(req.url.slice(6))}</b></body></html>`);
+          return;
+        }
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end(`<!doctype html><html><head><meta charset="utf-8"><title>demo2</title></head><body>
+<h1 id="t">hotel demo</h1>
+<select id="city" onchange="document.getElementById('picked').textContent='picked:'+this.value">
+  <option value="">--</option><option value="郑州">郑州</option>
+</select>
+<div id="picked"></div>
+<a id="dl" href="/hotels/export">导出</a>
+<script>
+document.getElementById("city").value = "";
+</script>
+</body></html>`);
+      });
+      server.listen(0, "127.0.0.1", ok);
+    });
+    const addr = server.address();
+    if (addr === null || typeof addr === "string") throw new Error("no port");
+    const base2 = `http://127.0.0.1:${addr.port}`;
+
+    const parsed = parseScenario({
+      name: "新步骤验证",
+      baseUrl: base2,
+      actors: { user: { dialogs: "accept" } },
+      steps: [
+        { type: "navigate", url: "/" },
+        { type: "select", selector: "#city", value: "郑州", expect: "选择城市" },
+        { type: "dom_assert", selector: "#picked", contains: "picked:郑州" },
+        { type: "extract", selector: "#t", into: "title", expect: "提取标题" },
+        { type: "download", click: "#dl", namePrefix: "hotels_", nameSuffix: ".csv", headerContains: "酒店名称", expect: "导出 CSV" },
+        { type: "js_assert", script: "document.title", equals: "demo2" },
+        { type: "js_assert", script: "1 > 2", truthy: false },
+        { type: "http", method: "POST", path: "/settings/shop/create", form: { name: "x" }, expectStatus: 403, expectJson: { code: -1 } },
+        { type: "navigate", url: "/goto?${var:title}" },
+        { type: "dom_assert", selector: "#who", contains: "hotel demo" },
+        { type: "dom_assert", selector: "b", countAtLeast: 1 },
+        { type: "js_assert", script: "document.querySelectorAll('h1').length", equals: 0 },
+        { type: "wait", ms: 50, timeoutMs: 5000 },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.issues.join(";"));
+    const r = await runScenario({ store, dataDir, projectId: "demo", scenario: parsed.scenario, triggeredBy: "vitest" });
+    if ("reason" in r) throw new Error(r.reason);
+    expect(r.status, JSON.stringify(r.steps.map((x) => [x.stepId, x.status, x.error.slice(0, 150)]))).toBe("passed");
+    const downloads = await readdir(path.join(r.dir, "downloads"));
+    expect(downloads.some((f) => f.startsWith("hotels_") && f.endsWith(".csv"))).toBe(true);
+  });
+});

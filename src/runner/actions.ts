@@ -16,6 +16,10 @@ export interface StepCtx {
   ai: AIDriver | null;
   log: (line: string) => void;
   shot: (label: string, phase: "before" | "after" | "fail") => Promise<void>;
+  /** extract 步骤写 run 内变量，供后续步骤 ${var:NAME} 引用 */
+  setVar: (name: string, value: string) => void;
+  /** download 步骤的落盘位置（证据目录 downloads/ 下） */
+  downloadPath: (suggestedName: string) => string;
 }
 
 export interface StepOutcome {
@@ -42,7 +46,21 @@ function record(out: StepOutcome, step: Step, kind: "det" | "ai", expected: stri
 }
 
 async function assertDom(page: Page, step: Extract<Step, { type: "dom_assert" }>): Promise<string> {
+  if (step.count !== undefined || step.countAtLeast !== undefined) {
+    const n = await page.locator(step.selector).count();
+    if (step.count !== undefined && n !== step.count)
+      return `元素个数期望 ${step.count}，实际 ${n}`;
+    if (step.countAtLeast !== undefined && n < step.countAtLeast)
+      return `元素个数期望 >= ${step.countAtLeast}，实际 ${n}`;
+    return "";
+  }
   const loc = page.locator(step.selector).first();
+  if (step.value !== undefined) {
+    const actual = await loc.inputValue().catch(() => "");
+    if (actual !== step.value)
+      return `输入值期望「${step.value}」实际「${actual}」`;
+    return "";
+  }
   if (step.state !== undefined) {
     const ok = await checkLocatorState(loc, step.state);
     return ok ? "" : `元素 ${step.selector} 不满足状态 ${step.state}`;
@@ -187,6 +205,97 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
           record(out, step, "ai", step.expected, ok ? "AI 认为匹配" : "AI 认为不匹配", ok);
           return ok;
         }
+        case "select": {
+          const opt = step.value !== undefined ? { value: step.value } : { label: step.label ?? "" };
+          await page.selectOption(step.selector, opt, { timeout: ctx.stepTimeoutMs });
+          record(out, step, "det", `选择 ${step.selector}`, step.value !== undefined ? `value=${step.value}` : `label=${step.label}`, true);
+          return true;
+        }
+        case "hover": {
+          await page.hover(step.selector, { timeout: ctx.stepTimeoutMs });
+          record(out, step, "det", `悬停 ${step.selector}`, "hovered", true);
+          return true;
+        }
+        case "extract": {
+          const loc = page.locator(step.selector).first();
+          await loc.waitFor({ state: "attached", timeout: timeoutMs(step, ctx) });
+          const value = step.attr !== undefined
+            ? (await loc.getAttribute(step.attr, { timeout: timeoutMs(step, ctx) })) ?? ""
+            : (await loc.innerText({ timeout: timeoutMs(step, ctx) })).trim();
+          ctx.setVar(step.into, value);
+          record(out, step, "det", `提取 ${step.selector} → ${step.into}`, value, true);
+          return true;
+        }
+        case "http": {
+          const url = new URL(step.path, ctx.baseUrl).href;
+          const res = await ctx.runtime.context.request.fetch(url, {
+            method: step.method,
+            form: step.form,
+            maxRedirects: step.maxRedirects,
+            failOnStatusCode: false,
+          });
+          const status = res.status();
+          const errors: string[] = [];
+          if (step.expectStatus !== undefined && status !== step.expectStatus)
+            errors.push(`状态码期望 ${step.expectStatus}，实际 ${status}`);
+          if (step.expectJson !== undefined) {
+            let json: Record<string, unknown> | null = null;
+            try {
+              json = (await res.json()) as Record<string, unknown>;
+            } catch {
+              errors.push("响应不是 JSON");
+            }
+            if (json !== null) {
+              for (const [k, v] of Object.entries(step.expectJson)) {
+                if (JSON.stringify(json[k]) !== JSON.stringify(v))
+                  errors.push(`字段 ${k} 期望 ${JSON.stringify(v)}，实际 ${JSON.stringify(json[k])}`);
+              }
+            }
+          }
+          record(out, step, "det", `${step.method} ${step.path} → ${describeHttpExpect(step)}`, `HTTP ${status}${errors.length ? "；" + errors.join("; ") : ""}`, errors.length === 0);
+          return errors.length === 0;
+        }
+        case "js_assert": {
+          const deadline = Date.now() + timeoutMs(step, ctx);
+          let last = "";
+          for (;;) {
+            const value: unknown = await page.evaluate(step.script);
+            last = describeJsValue(value);
+            if (jsAssertionOk(value, step)) {
+              record(out, step, "det", describeJsExpectation(step), last, true);
+              return true;
+            }
+            if (Date.now() >= deadline) {
+              record(out, step, "det", describeJsExpectation(step), last, false);
+              return false;
+            }
+            await page.waitForTimeout(500);
+          }
+        }
+        case "download": {
+          const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs(step, ctx) });
+          downloadPromise.catch(() => {
+            /* click 先失败时这里会超时拒绝，避免 unhandled rejection */
+          });
+          await page.click(step.click, { timeout: ctx.stepTimeoutMs });
+          const dl = await downloadPromise;
+          const fname = dl.suggestedFilename();
+          const saveTo = ctx.downloadPath(fname);
+          await dl.saveAs(saveTo);
+          const errors: string[] = [];
+          if (step.namePrefix !== undefined && !fname.startsWith(step.namePrefix))
+            errors.push(`文件名期望前缀「${step.namePrefix}」，实际「${fname}」`);
+          if (step.nameSuffix !== undefined && !fname.endsWith(step.nameSuffix))
+            errors.push(`文件名期望后缀「${step.nameSuffix}」，实际「${fname}」`);
+          if (step.headerContains !== undefined) {
+            const { readFile } = await import("node:fs/promises");
+            const firstLine = (await readFile(saveTo, "utf8")).split(/\r?\n/)[0] ?? "";
+            if (!firstLine.includes(step.headerContains))
+              errors.push(`首行期望包含「${step.headerContains}」，实际「${firstLine.slice(0, 120)}」`);
+          }
+          record(out, step, "det", describeDownloadExpect(step), `下载 ${fname}${errors.length ? "；" + errors.join("; ") : ""}`, errors.length === 0);
+          return errors.length === 0;
+        }
       }
     } catch (e) {
       out.error = e instanceof Error ? e.message : String(e);
@@ -211,11 +320,52 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
   return out;
 }
 
+function timeoutMs(step: Step, ctx: StepCtx): number {
+  return step.timeoutMs ?? ctx.stepTimeoutMs;
+}
+
+function describeHttpExpect(step: Extract<Step, { type: "http" }>): string {
+  const parts: string[] = [];
+  if (step.expectStatus !== undefined) parts.push(`status=${step.expectStatus}`);
+  if (step.expectJson !== undefined) parts.push(`json=${JSON.stringify(step.expectJson)}`);
+  return parts.length ? parts.join(" ") : "记录状态";
+}
+
+function describeJsExpectation(step: Extract<Step, { type: "js_assert" }>): string {
+  const parts = [step.script.slice(0, 120)];
+  if (step.equals !== undefined) parts.push(`equals=${JSON.stringify(step.equals)}`);
+  if (step.contains !== undefined) parts.push(`contains=${step.contains}`);
+  if (step.truthy !== undefined) parts.push("truthy");
+  return parts.join(" ");
+}
+
+function describeJsValue(value: unknown): string {
+  if (typeof value === "string") return value.length > 200 ? value.slice(0, 200) + "…" : value;
+  return JSON.stringify(value) ?? String(value);
+}
+
+function jsAssertionOk(value: unknown, step: Extract<Step, { type: "js_assert" }>): boolean {
+  if (step.equals !== undefined) return JSON.stringify(value) === JSON.stringify(step.equals);
+  if (step.contains !== undefined) return String(value).includes(step.contains);
+  return Boolean(value) === (step.truthy ?? true);
+}
+
+function describeDownloadExpect(step: Extract<Step, { type: "download" }>): string {
+  const parts: string[] = [`点击 ${step.click}`];
+  if (step.namePrefix !== undefined) parts.push(`前缀=${step.namePrefix}`);
+  if (step.nameSuffix !== undefined) parts.push(`后缀=${step.nameSuffix}`);
+  if (step.headerContains !== undefined) parts.push(`首行含=${step.headerContains}`);
+  return parts.join(" ");
+}
+
 function describeDomExpectation(step: Extract<Step, { type: "dom_assert" }>): string {
   const parts = [step.selector];
   if (step.state !== undefined) parts.push(`state=${step.state}`);
   if (step.text !== undefined) parts.push(`text=${step.text}`);
   if (step.contains !== undefined) parts.push(`contains=${step.contains}`);
+  if (step.value !== undefined) parts.push(`value=${step.value}`);
+  if (step.count !== undefined) parts.push(`count=${step.count}`);
+  if (step.countAtLeast !== undefined) parts.push(`countAtLeast=${step.countAtLeast}`);
   return parts.join(" ");
 }
 

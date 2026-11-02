@@ -56,6 +56,8 @@ const stepCommon = {
   expect: z.string().max(200).optional(),
   /** warn：步骤失败时记录警告，场景不判失败 */
   onFail: z.enum(["fail", "warn"]).default("fail"),
+  /** 覆盖场景级 stepTimeoutMs（navigate/wait/js_assert 等长步骤用） */
+  timeoutMs: z.number().int().min(100).max(600_000).optional(),
 };
 
 const stepSchema = z.discriminatedUnion("type", [
@@ -121,6 +123,67 @@ const stepSchema = z.discriminatedUnion("type", [
       .optional(),
     text: z.string().optional(),
     contains: z.string().optional(),
+    /** input/textarea 的当前值（精确匹配） */
+    value: z.string().optional(),
+    /** 匹配的元素个数（精确） */
+    count: z.number().int().min(0).optional(),
+    /** 匹配的元素个数下限 */
+    countAtLeast: z.number().int().min(1).optional(),
+  }),
+  z.object({
+    ...stepCommon,
+    type: z.literal("select"),
+    selector: z.string().min(1),
+    /** option 的 value 属性 */
+    value: z.string().optional(),
+    /** option 的可见文本 */
+    label: z.string().optional(),
+  }),
+  z.object({
+    ...stepCommon,
+    type: z.literal("hover"),
+    selector: z.string().min(1),
+  }),
+  z.object({
+    ...stepCommon,
+    type: z.literal("extract"),
+    selector: z.string().min(1),
+    /** 取属性值；缺省取 innerText */
+    attr: z.string().optional(),
+    /** 存入 run 内变量，后续步骤用 ${var:NAME} 引用 */
+    into: slugKey,
+  }),
+  z.object({
+    ...stepCommon,
+    type: z.literal("http"),
+    method: httpMethod,
+    path: z.string().min(1),
+    /** 表单编码请求体（复用 actor 登录态 cookie） */
+    form: z.record(z.string(), z.string()).optional(),
+    /** 不跟随重定向（断言 302 时用） */
+    maxRedirects: z.number().int().min(0).max(20).optional(),
+    expectStatus: z.number().int().min(200).max(599).optional(),
+    expectJson: z.record(z.string(), z.unknown()).optional(),
+  }),
+  z.object({
+    ...stepCommon,
+    type: z.literal("js_assert"),
+    /** page.evaluate 的脚本：表达式或 () => value */
+    script: z.string().min(1),
+    equals: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    contains: z.string().optional(),
+    /** 结果为真值即通过 */
+    truthy: z.boolean().optional(),
+  }),
+  z.object({
+    ...stepCommon,
+    type: z.literal("download"),
+    /** 触发下载的点击 */
+    click: z.string().min(1),
+    namePrefix: z.string().optional(),
+    nameSuffix: z.string().optional(),
+    /** 下载文件首行需包含（CSV/xlsx 表头，只读文本文件） */
+    headerContains: z.string().optional(),
   }),
   z.object({
     ...stepCommon,
@@ -135,6 +198,8 @@ const stepSchema = z.discriminatedUnion("type", [
 
 export const actorSchema = z.object({
   description: z.string().max(200).optional(),
+  /** 原生 confirm/alert 处理：accept 自动接受（停用店铺等），缺省 dismiss */
+  dialogs: z.enum(["accept", "dismiss"]).optional(),
   cookies: z.array(cookie).max(50).optional(),
   localStorage: z.record(z.string(), z.string()).optional(),
   sessionStorage: z.record(z.string(), z.string()).optional(),
@@ -207,6 +272,38 @@ export const scenarioSchema = z
     };
     checkWait(s.steps, "steps");
     checkWait(s.teardown ?? [], "teardown");
+    // select 需要 value 或 label；js_assert 需要至少一种期望；extract 需要 as
+    const checkSteps = (
+      steps: z.infer<typeof stepSchema>[],
+      where: string,
+      rule: (st: z.infer<typeof stepSchema>) => string | null,
+    ) => {
+      steps.forEach((st, i) => {
+        const msg = rule(st);
+        if (msg !== null) ctx.addIssue({ code: "custom", path: [where, i], message: msg });
+      });
+    };
+    const rules = [
+      (st: z.infer<typeof stepSchema>): string | null =>
+        st.type === "select" && st.value === undefined && st.label === undefined
+          ? "select 需要 value 或 label 之一"
+          : null,
+      (st: z.infer<typeof stepSchema>): string | null =>
+        st.type === "extract" && st.into === undefined
+          ? "extract 需要 into（写入的变量名）"
+          : null,
+      (st: z.infer<typeof stepSchema>): string | null =>
+        st.type === "js_assert" &&
+        st.equals === undefined &&
+        st.contains === undefined &&
+        st.truthy === undefined
+          ? "js_assert 需要 equals / contains / truthy 之一"
+          : null,
+    ];
+    for (const rule of rules) {
+      checkSteps(s.steps, "steps", rule);
+      checkSteps(s.teardown ?? [], "teardown", rule);
+    }
   });
 
 export type Scenario = z.infer<typeof scenarioSchema>;

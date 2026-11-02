@@ -115,5 +115,13 @@ export async function openActor(input: OpenActorInput): Promise<ActorRuntime> {
     await context.clock.setFixedTime(new Date(actor.clock.now));
   }
   const page = await context.newPage();
+  if (actor.dialogs === "accept") {
+    page.on("dialog", (d) => {
+      void d.accept().catch(() => {
+        /* 页面已导航时 accept 可能失败，不影响主流程 */
+      });
+      input.log(`DIALOG accept ${d.type()}: ${d.message().slice(0, 80)}`);
+    });
+  }
   return { name, context, page, network };
 }
