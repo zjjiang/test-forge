@@ -99,8 +99,6 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .shots{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .shot{aspect-ratio:16/10;max-width:100%;background:repeating-linear-gradient(45deg,var(--stripe-a),var(--stripe-a) 10px,var(--stripe-b) 10px,var(--stripe-b) 20px);border:1px solid var(--line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--mut);font:12px var(--f-mono)}
 .att{font:12px var(--f-mono);margin-top:4px}
-.lastrun{cursor:pointer}
-.lastrun:hover .b{outline:2px solid var(--pri);outline-offset:1px}
 .warn{background:var(--warn-bg);border:1px solid var(--warn-line);padding:8px 10px;border-radius:4px;font-size:13px}
 .err{color:var(--bad);font-size:13px;margin-top:6px;min-height:1em}
 @media (max-width:760px){
@@ -232,8 +230,9 @@ async function tabScenarios(p, counts) {
     }
     var last = s.lastRun;
     h += '<tr><td><b title="' + esc(s.file) + '">' + esc(s.name) + '</b></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
-      + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>'
-      + (last ? '<span class="lastrun" title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">' + badge(last.status) + '</span>' : '—') + '</td>'
+      + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
+      + '<td>' + (last ? '<button class="link" title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">查看结果</button> ' : '')
+      + '<button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
       + '<td><button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
   });
   return h + '</table></div>';
