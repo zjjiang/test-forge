@@ -93,9 +93,15 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .tag.det{color:var(--ok);border-color:var(--ok)}.tag.ai{color:var(--rev);border-color:var(--rev)}
 .st.on{background:var(--pri-soft);border-color:var(--pri)}
 .flow{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start}
-.flow .srow{grid-column:1/-1;font-size:12px;display:flex;gap:8px;align-items:baseline;border-bottom:1px dashed var(--line);padding:3px 2px}
+.flow > .srow{grid-column:1/-1;font-size:12px;display:flex;gap:8px;align-items:baseline;border-bottom:1px dashed var(--line);padding:3px 2px}
 .flow .srow .mut{margin-left:auto;white-space:nowrap}
 .flow .srow b{white-space:nowrap}
+.flow details.small{margin-top:6px;font-size:12px}
+.flow details.small summary{cursor:pointer;color:var(--mut,#888);user-select:none;list-style:none}
+.flow details.small summary::before{content:'▸ ';}
+.flow details.small[open] summary::before{content:'▾ ';}
+.flow details.small .srow{border-bottom:1px dashed var(--line);padding:2px 0}
+.flow details.small .srow .mut{margin-left:auto;white-space:nowrap}
 .flow figcaption b{margin-right:6px}
 .shot{aspect-ratio:16/10;max-width:100%;background:repeating-linear-gradient(45deg,var(--stripe-a),var(--stripe-a) 10px,var(--stripe-b) 10px,var(--stripe-b) 20px);border:1px solid var(--line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--mut);font:12px var(--f-mono)}
 .att{font:12px var(--f-mono);margin-top:4px}
@@ -361,25 +367,39 @@ async function viewRun() {
       + bad.map(function (st) { return '<b>' + esc(st.stepId) + '</b>' + (st.error ? '（' + esc(st.error.slice(0, 90)) + '）' : ''); }).join('；')
       + '</div>';
   }
+  /* 大步骤 = 有截图的关键节点；之间的小步骤默认折叠，点开查看 */
+  function smallRows(arr) {
+    return arr.map(function (it) {
+      var st = it.st;
+      return '<div class="srow"><b>' + (it.si + 1) + '. ' + esc(st.stepId) + '</b>' + badge(st.status)
+        + (st.expect && st.expect !== st.stepId ? '<span class="mut">' + esc(st.expect) + '</span>' : '')
+        + '<span class="mut">' + (st.ms || 0) + 'ms · 无截图</span></div>';
+    }).join('');
+  }
+  var groups = [], pending = [];
+  steps.forEach(function (st, si) {
+    if ((st.shots || []).length) { groups.push({ st: st, si: si, shots: st.shots, small: pending }); pending = []; }
+    else pending.push({ st: st, si: si });
+  });
   h += '<div class="flow">';
   if (!steps.length) h += '<span class="mut">（本次执行没有步骤）</span>';
-  steps.forEach(function (st, si) {
-    var shots = st.shots || [];
-    var cap = '<b>' + (si + 1) + '. ' + esc(st.stepId) + '</b>' + badge(st.status)
-      + (st.expect && st.expect !== st.stepId ? '<span class="mut">' + esc(st.expect) + '</span>' : '');
-    if (!shots.length) {
-      /* 没截图的步骤：一行细条，不跳步 */
-      h += '<div class="srow">' + cap + '<span class="mut">' + (st.ms || 0) + 'ms · 无截图</span></div>';
-      return;
-    }
-    shots.forEach(function (f) {
-      var label = '步骤 ' + (si + 1) + ' ' + st.stepId + (st.expect && st.expect !== st.stepId ? ' — ' + st.expect : '');
+  if (!groups.length) h += '<div class="srow">' + smallRows(pending) + '</div>';
+  groups.forEach(function (g) {
+    var cap = '<b>' + (g.si + 1) + '. ' + esc(g.st.stepId) + '</b>' + badge(g.st.status)
+      + (g.st.expect && g.st.expect !== g.st.stepId ? '<span class="mut">' + esc(g.st.expect) + '</span>' : '');
+    g.shots.forEach(function (f) {
+      var label = '步骤 ' + (g.si + 1) + ' ' + g.st.stepId + (g.st.expect && g.st.expect !== g.st.stepId ? ' — ' + g.st.expect : '');
       var idx = S.shots.length;
       S.shots.push({ src: base + f, caption: label + ' · ' + f });
       h += '<figure><img src="' + base + esc(f) + '" loading="lazy" style="max-width:100%;cursor:zoom-in" onclick="lbOpen(' + idx + ')" title="点击放大">'
-        + '<figcaption>' + cap + '<div class="mut">' + esc(f) + '</div></figcaption></figure>';
+        + '<figcaption>' + cap + '<div class="mut">' + esc(f) + '</div>'
+        + (g.small.length ? '<details class="small"><summary>展开 ' + g.small.length + ' 个小步骤</summary>' + smallRows(g.small) + '</details>' : '')
+        + '</figcaption></figure>';
     });
   });
+  if (groups.length && pending.length) {
+    h += '<figure><figcaption><details class="small" open><summary>其后 ' + pending.length + ' 个小步骤（收尾等）</summary>' + smallRows(pending) + '</details></figcaption></figure>';
+  }
   h += '</div>';
   return { side: side({ name: run.scenarioName, baseUrl: '' }, {}), body: h };
 }
