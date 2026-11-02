@@ -36,6 +36,23 @@ AI 负责操作，代码负责验证，证据负责说明，人负责最终确�
 - 安全护栏：拦截高危接口，拒绝在生产域名上运行。
 - CLI 和 Web 共用同一个执行引擎，CLI 支持 `--json` 输出，方便 Claude Code、Codex 等 Agent 调用。
 
+## 快速开始（开发中）
+
+```bash
+pnpm install
+pnpm tf project add htinns "HTinns 新平台" http://127.0.0.1:5005
+pnpm tf var set htinns ADMIN_USER=admin --secret --note 管理员账号
+pnpm tf validate scenarios/htinns/      # 校验场景
+pnpm tf run scenarios/htinns/新店开通.yaml -p htinns   # 执行
+pnpm tf runs                            # 执行历史
+pnpm tf report                          # 打开最近一次的报告
+pnpm tf serve                           # Web 控制台 http://127.0.0.1:3300
+```
+
+场景 YAML 放在 `scenarios/<项目ID>/` 下，Web 控制台会自动索引。
+AI 步骤需要 GLM 配置：给项目加 `MIDSCENE_MODEL_FAMILY=glm-v`、
+`MIDSCENE_MODEL_NAME`、`MIDSCENE_MODEL_BASE_URL`、`MIDSCENE_MODEL_API_KEY`（secret）。
+
 ## 文档
 
 - [实施计划](docs/plan.md)

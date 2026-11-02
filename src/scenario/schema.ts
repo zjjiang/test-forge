@@ -7,7 +7,7 @@ const slugKey = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[a-z][a-z0-9_]*$/, "只允许小写字母开头，小写字母/数字/下划线");
+  .regex(/^[a-z][a-z0-9_-]*$/, "只允许小写字母开头，小写字母/数字/下划线/短横线");
 
 const httpMethod = z.enum([
   "GET",

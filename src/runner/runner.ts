@@ -10,6 +10,7 @@ import { openActor, type ActorRuntime } from "./env.js";
 import { executeStep, freezeAndShot, type AIDriver } from "./actions.js";
 import { makeRedactor } from "./redact.js";
 import { Evidence } from "./evidence.js";
+import { renderReport } from "../evidence/report.js";
 import { verdict } from "./verdict.js";
 import { midsceneConfigured, createMidsceneDriver } from "./midscene.js";
 import type { RunResult, StepResult, StepStatus } from "./types.js";
@@ -159,6 +160,7 @@ export async function runScenario(
         );
         return;
       }
+      const stepShots: string[] = [];
       const result = await executeStep(step, {
         runtime,
         baseUrl: baseUrl,
@@ -166,11 +168,9 @@ export async function runScenario(
         ai,
         log,
         shot: async (label, phase) => {
-          const p = evidence.shotPath(
-            `${String(i + 1).padStart(2, "0")}-${label}`,
-            phase,
-          );
+          const p = evidence.shotPath(label, phase);
           await freezeAndShot(runtime.page, p);
+          stepShots.push(path.relative(evidence.dir, p));
         },
       });
       const status: StepStatus = result.ok
@@ -189,7 +189,7 @@ export async function runScenario(
         attempts: result.attempts,
         assertions: result.assertions,
         error: result.ok ? "" : result.error,
-        shots: [],
+        shots: stepShots,
       });
       if (!result.ok && step.onFail === "warn")
         warnings.push({
@@ -245,6 +245,13 @@ export async function runScenario(
     dir: evidence.dir,
   };
   evidence.writeSummary(result);
+  evidence.writeText(
+    "report.html",
+    renderReport(
+      result,
+      warnings.map((w) => w.where + ": " + w.message),
+    ),
+  );
   evidence.writeJson(
     "assertions.json",
     stepResults.flatMap((s) => s.assertions),

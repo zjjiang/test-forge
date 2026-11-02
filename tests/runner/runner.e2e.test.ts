@@ -97,12 +97,16 @@ describe("runner e2e", () => {
     expect(files).toContain("summary.json");
     expect(files).toContain("assertions.json");
     expect(files).toContain("execution.log");
+    expect(files).toContain("report.html");
     expect(files).toContain("vars.json");
     expect(files).toContain("trace-user.zip");
     const shots = await readdir(path.join(r.dir, "screenshots"));
     expect(shots.length).toBeGreaterThan(0);
     const summary = JSON.parse(await readFile(path.join(r.dir, "summary.json"), "utf8"));
     expect(summary.status).toBe("passed");
+    const report = await readFile(path.join(r.dir, "report.html"), "utf8");
+    expect(report).toContain("冒烟场景");
+    expect(report).toContain("screenshots/");
     // guard blocked /health
     const log = await readFile(path.join(r.dir, "execution.log"), "utf8");
     expect(log).toContain("GUARD blocked");

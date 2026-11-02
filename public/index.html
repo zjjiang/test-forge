@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TestForge 控制台</title>
+<style>
+/* Layout: 侧栏项目导航 + 右侧工作区；运行详情为「步骤轨道 | 证据面板」两栏，窄屏堆叠 */
+:root{
+ --bg:#f4f5f7;--card:#ffffff;--line:#dde1e8;--fg:#1a2030;--mut:#5d6679;
+ --pri:#2f5bd3;--pri-soft:#e9eefc;
+ --side:#151b29;--side-fg:#c3cad8;--side-on:#232c40;--side-mut:#78829a;
+ --ok:#24804a;--bad:#c2362f;--rev:#b86a00;--skip:#79808c;
+ --th:#f8f9fb;--code:#eef0f4;--warn-bg:#fff5e6;--warn-line:#f0cf9a;
+ --stripe-a:#eceef2;--stripe-b:#e4e7ec;
+ --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+ --f-body:"IBM Plex Sans","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+ --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;
+ --bg:#10141d;--card:#171c28;--line:#2a3142;--fg:#e3e7ef;--mut:#959eb2;
+ --pri:#7f9cff;--pri-soft:#1f2a47;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
+ --ok:#4cb877;--bad:#ef6b62;--rev:#e3a043;--skip:#8a919e;
+ --th:#1b2130;--code:#222938;--warn-bg:#2b2213;--warn-line:#5c4518;--stripe-a:#1d2331;--stripe-b:#212839}}
+:root[data-theme="dark"]{color-scheme:dark;
+ --bg:#10141d;--card:#171c28;--line:#2a3142;--fg:#e3e7ef;--mut:#959eb2;
+ --pri:#7f9cff;--pri-soft:#1f2a47;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
+ --ok:#4cb877;--bad:#ef6b62;--rev:#e3a043;--skip:#8a919e;
+ --th:#1b2130;--code:#222938;--warn-bg:#2b2213;--warn-line:#5c4518;--stripe-a:#1d2331;--stripe-b:#212839}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.55 var(--f-body);color:var(--fg);background:var(--bg);font-variant-numeric:tabular-nums}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+.app.solo{display:block}
+.app.solo main{max-width:none;padding:0 0 40px}
+.app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+aside{background:var(--card);border-right:1px solid var(--line);padding-block:18px;padding-left:env(safe-area-inset-left,0px);position:sticky;top:0;align-self:start;min-height:100vh}
+aside .back{display:block;padding:4px 16px 14px;color:var(--pri);cursor:pointer;font-size:13px}
+aside .pname{font:700 17px/1.25 var(--f-display);font-stretch:88%;padding:0 16px}
+aside .purl{font:12px var(--f-mono);color:var(--mut);padding:2px 16px 14px;overflow-wrap:anywhere}
+aside nav{display:flex;flex-direction:column;border-top:1px solid var(--line);padding-top:8px}
+aside nav a{display:flex;justify-content:space-between;padding:8px 16px;color:var(--fg);cursor:pointer;border-left:3px solid transparent}
+aside nav a:hover{background:var(--pri-soft)}
+aside nav a.on{background:var(--pri-soft);border-left-color:var(--pri);color:var(--pri);font-weight:600}
+.cnt{font:12px var(--f-mono);color:var(--mut)}
+.top{background:var(--side);color:var(--side-fg);display:flex;gap:16px;align-items:baseline;flex-wrap:wrap;padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));margin-bottom:24px}
+.top .mut{color:var(--side-mut)}
+.brand{font:800 22px/1 var(--f-display);font-stretch:78%;letter-spacing:.03em;text-transform:uppercase;color:#fff}
+.brand span{color:#8fa6ff}
+.home{max-width:1200px;margin-inline:auto}
+h3{font:700 16px/1.3 var(--f-display);margin:28px 0 10px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.pcard{display:flex;flex-direction:column;gap:8px;text-align:left;padding:18px;border-radius:6px;background:var(--card);border:1px solid var(--line);transition:border-color .15s,box-shadow .15s}
+.pcard:hover{border-color:var(--pri);box-shadow:0 2px 10px rgba(30,50,110,.10)}
+.pcard .ph{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.pcard .ph b{font:700 18px/1.25 var(--f-display);font-stretch:90%}
+.pcard code{align-self:flex-start}
+.pcard dl{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:6px 0 0;padding-top:10px;border-top:1px solid var(--line)}
+.pcard dt{font-size:11px;letter-spacing:.06em;color:var(--mut)}
+.pcard dd{margin:0;font:600 18px/1.3 var(--f-display)}
+.pf{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.strip{display:inline-flex;gap:3px}.strip i{width:8px;height:16px;border-radius:2px;background:var(--skip)}
+.strip i.passed{background:var(--ok)}.strip i.failed{background:var(--bad)}.strip i.needs_review{background:var(--rev)}
+.form{display:flex;flex-direction:column;gap:10px}
+.fgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
+.fgrid label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mut)}
+.empty{color:var(--mut);text-align:center;padding:24px}
+main{padding-block:22px 40px;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));max-width:1200px;width:100%;margin-inline:auto}
+.crumb{color:var(--mut);font-size:13px;margin-bottom:6px}.crumb a{color:var(--pri);cursor:pointer}
+h2{margin:0 0 14px;font:700 24px/1.2 var(--f-display);font-stretch:88%;text-wrap:balance;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:16px;overflow-x:auto}
+.tabs a{padding:8px 14px;cursor:pointer;color:var(--mut);border-bottom:2px solid transparent;white-space:nowrap}
+.tabs a.on{color:var(--pri);border-color:var(--pri);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:16px;overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);font-weight:500;background:var(--th)}
+tr.click{cursor:pointer}tr.click:hover td{background:var(--pri-soft)}
+input,select{font:inherit;color:var(--fg);background:var(--card);padding:5px 8px;border:1px solid var(--line);border-radius:4px;width:100%}
+button{font:inherit;color:var(--fg);padding:6px 12px;border-radius:4px;border:1px solid var(--line);background:var(--card);cursor:pointer}
+button.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
+button.link{border:0;background:none;color:var(--pri);padding:2px 4px}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap}
+.mut{color:var(--mut);font-size:13px}
+code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-radius:3px;font-size:12px}
+.b{display:inline-block;padding:1px 8px;border-radius:3px;font-size:12px;font-weight:500;color:#fff;white-space:nowrap}
+.b.passed{background:var(--ok)}.b.failed{background:var(--bad)}.b.needs_review{background:var(--rev)}.b.skipped{background:var(--skip)}
+.tag{font-size:11px;padding:0 6px;border-radius:3px;border:1px solid}
+.tag.det{color:var(--ok);border-color:var(--ok)}.tag.ai{color:var(--rev);border-color:var(--rev)}
+.stat{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.stat div{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px}
+.stat b{display:block;font:700 22px/1.3 var(--f-display)}
+.steps{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px}
+.st{padding:8px 10px;border-radius:4px;cursor:pointer;border:1px solid transparent}
+.st.on{background:var(--pri-soft);border-color:var(--pri)}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.shot{aspect-ratio:16/10;max-width:100%;background:repeating-linear-gradient(45deg,var(--stripe-a),var(--stripe-a) 10px,var(--stripe-b) 10px,var(--stripe-b) 20px);border:1px solid var(--line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--mut);font:12px var(--f-mono)}
+.att{font:12px var(--f-mono);margin-top:4px}
+.warn{background:var(--warn-bg);border:1px solid var(--warn-line);padding:8px 10px;border-radius:4px;font-size:13px}
+.err{color:var(--bad);font-size:13px;margin-top:6px;min-height:1em}
+@media (max-width:760px){
+ .app{grid-template-columns:1fr}
+ aside{position:static;min-height:0;border-right:0;border-bottom:1px solid var(--line);padding-block:10px 0}
+ aside nav{flex-direction:row;overflow-x:auto;border-top:0}
+ aside nav a{border-left:0;border-bottom:3px solid transparent;white-space:nowrap;gap:6px}
+ aside nav a.on{border-bottom-color:var(--pri)}
+ .stat,.pcard dl{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .steps,.shots,.fgrid{grid-template-columns:1fr}
+ .pgrid{grid-template-columns:1fr}
+}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.app.solo main{max-width:none;padding:0 0 40px}
+.app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+</style></head><body>
+<div class="app" id="app"><aside id="side" hidden></aside><main id="main"></main></div>
+<script>
+/* API 层：全部走 Fastify，统一信封 {success,data,error} */
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({ success: false, error: '响应不是 JSON' }));
+  if (!res.ok || body.success === false) throw new Error(body.error || ('HTTP ' + res.status));
+  return body.data;
+}
+const j = (method, data) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+
+var S = { view: 'home', p: null, tab: 'scenarios', run: null, step: 0, reveal: {}, edit: null, filter: null, creating: false, poll: null };
+function go(o) { Object.assign(S, o); if (S.poll) { clearInterval(S.poll); S.poll = null; } render(); }
+
+var CACHE = { projects: null, project: {}, vars: {}, scenarios: {}, runs: {}, run: {} };
+function badge(s) { var m = { passed: '通过', failed: '失败', needs_review: '待人工复核', skipped: '跳过', running: '执行中' }; return '<span class="b ' + s + '">' + (m[s] || s) + '</span>'; }
+function fmtMs(ms) { return ms >= 10000 ? (ms / 1000).toFixed(0) + 's' : ms + 'ms'; }
+function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+/* ---------- 首页 ---------- */
+function strip(rs) {
+  if (!rs.length) return '<span class="mut">还没有执行记录</span>';
+  return '<span class="strip">' + rs.slice(0, 10).reverse().map(function (r) { return '<i class="' + r.status + '" title="' + r.id + ' ' + r.status + '"></i>'; }).join('') + '</span>';
+}
+function passRate(rs) {
+  var done = rs.filter(function (r) { return r.status !== 'skipped'; });
+  return done.length ? Math.round(100 * done.filter(function (r) { return r.status === 'passed'; }).length / done.length) + '%' : '—';
+}
+async function viewHome() {
+  var projects = CACHE.projects = await api('/api/projects');
+  var allRuns = await api('/api/runs?limit=6').catch(function () { return []; });
+  var h = '<header class="top"><div class="brand">Test<span>Forge</span></div><span class="mut">Data Forge · 场景驱动的 AI 测试平台</span></header><div class="home">';
+  h += '<div class="row"><h2>项目</h2><button class="pri" onclick="go({creating:true})">新建项目</button></div>';
+  if (S.creating) h += newProjectForm();
+  h += '<div class="pgrid">';
+  for (var p of projects) {
+    var rs = await api('/api/projects/' + p.id + '/runs?limit=10').catch(function () { return []; });
+    var last = rs[0];
+    h += '<button class="pcard" onclick="openProject(\'' + p.id + '\')"><div class="ph"><b>' + esc(p.name) + '</b>' + (last ? badge(last.status) : '') + '</div>'
+      + '<div class="mut">' + esc(p.description) + '</div><code>' + esc(p.baseUrl) + '</code>'
+      + '<dl><div><dt>执行</dt><dd>' + rs.length + '</dd></div><div><dt>通过率</dt><dd>' + passRate(rs) + '</dd></div></dl>'
+      + '<div class="pf">' + strip(rs) + (last ? '<span class="mut">最近 ' + esc((last.startedAt || '').slice(5, 16).replace('T', ' ')) + '</span>' : '') + '</div></button>';
+  }
+  h += '</div><h3>最近执行</h3><div class="card"><table><tr><th>Run ID</th><th>项目</th><th>场景</th><th>状态</th><th>触发</th><th>时间</th></tr>';
+  if (!allRuns.length) h += '<tr><td colspan="6" class="empty">还没有执行记录。</td></tr>';
+  for (var r of allRuns) {
+    h += '<tr class="click" onclick="openRun(\'' + r.projectId + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.projectId) + '</td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc((r.startedAt || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
+  }
+  return h + '</table></div></div>';
+}
+function newProjectForm() {
+  return '<div class="card form"><b>新建项目</b><div class="fgrid">'
+    + '<label>名称<input id="np-name" placeholder="如 HTinns 新平台"></label>'
+    + '<label>项目 ID<input id="np-id" placeholder="小写字母/数字/短横线"></label>'
+    + '<label>被测地址<input id="np-url" placeholder="http://127.0.0.1:5005"></label>'
+    + '<label>说明<input id="np-desc" placeholder="可选"></label></div>'
+    + '<div id="np-err" class="err"></div><div class="row" style="justify-content:flex-start;margin:0"><button class="pri" onclick="createProject()">创建并配置变量</button><button onclick="go({creating:false})">取消</button></div></div>';
+}
+async function createProject() {
+  var v = function (i) { return document.getElementById(i).value.trim(); };
+  try {
+    await api('/api/projects', j('POST', { id: v('np-id'), name: v('np-name'), baseUrl: v('np-url'), description: v('np-desc') }));
+    CACHE.projects = null;
+    go({ view: 'project', p: v('np-id'), tab: 'vars', creating: false, edit: null, reveal: {} });
+  } catch (e) { document.getElementById('np-err').textContent = e.message; }
+}
+
+/* ---------- 项目内 ---------- */
+var TABS = [['scenarios', '场景'], ['runs', '执行历史'], ['vars', '环境变量'], ['guards', '安全护栏']];
+function openProject(id) { go({ view: 'project', p: id, tab: 'scenarios', filter: null, edit: null, reveal: {} }); }
+function side(p, counts) {
+  var cur = S.view === 'run' ? 'runs' : S.tab;
+  var h = '<a class="back" onclick="home()">← 全部项目</a><div class="pname">' + esc(p.name) + '</div><div class="purl">' + esc(p.baseUrl) + '</div><nav>';
+  TABS.forEach(function (t) {
+    h += '<a class="' + (cur === t[0] ? 'on' : '') + '" onclick="go({view:\'project\',tab:\'' + t[0] + '\',filter:null,edit:null})">' + t[1] + '<span class="cnt">' + (counts[t[0]] || 0) + '</span></a>';
+  });
+  return h + '</nav>';
+}
+async function viewProject() {
+  var p = await api('/api/projects/' + S.p);
+  var tab = S.tab;
+  var counts = { scenarios: (CACHE.scenarios[S.p] || []).length, runs: (CACHE.runs[S.p] || []).length, vars: (CACHE.vars[S.p] || []).length, guards: p.blockedRoutes.length };
+  if (tab === 'scenarios') return { side: side(p, counts), body: await tabScenarios(p, counts) };
+  if (tab === 'runs') return { side: side(p, counts), body: await tabRuns(p, counts) };
+  if (tab === 'vars') return { side: side(p, counts), body: await tabVars(p, counts) };
+  return { side: side(p, counts), body: tabGuards(p) };
+}
+async function tabScenarios(p, counts) {
+  var items = CACHE.scenarios[S.p] = await api('/api/projects/' + S.p + '/scenarios');
+  var h = '<div class="card"><div class="row"><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引；改动后刷新本页。</span></div><table><tr><th>场景</th><th>角色</th><th>步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
+  if (!items.length) h += '<tr><td colspan="6" class="empty">还没有场景。在 scenarios/' + esc(p.id) + '/ 下放 YAML，或让 Claude Code 按需求生成。</td></tr>';
+  items.forEach(function (s) {
+    if (!s.valid) {
+      h += '<tr><td><b>' + esc(s.file) + '</b></td><td colspan="5" class="err">' + s.issues.map(esc).join('<br>') + '</td></tr>';
+      return;
+    }
+    var last = s.lastRun;
+    h += '<tr><td><b>' + esc(s.name) + '</b><div class="mut">' + esc(s.file) + '</div></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
+      + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
+      + '<td><button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\')">运行</button></td></tr>';
+  });
+  return h + '</table></div>';
+}
+async function tabRuns(p, counts) {
+  var q = '/api/projects/' + S.p + '/runs?limit=50' + (S.filter ? '&scenario=' + encodeURIComponent(S.filter) : '');
+  var rs = CACHE.runs[S.p] = await api(q);
+  var h = '<div class="card"><div class="row"><span>' + (S.filter ? '场景 <b>' + esc(S.filter) + '</b> 的执行记录 <button class="link" onclick="go({filter:null})">清除筛选</button>' : '全部执行记录') + '</span></div><table><tr><th>Run ID</th><th>场景</th><th>状态</th><th>耗时</th><th>触发</th><th>时间</th></tr>';
+  if (!rs.length) h += '<tr><td colspan="6" class="empty">还没有执行记录。</td></tr>';
+  rs.forEach(function (r) {
+    h += '<tr class="click" onclick="openRun(\'' + p.id + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + fmtMs(r.durationMs) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc((r.startedAt || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
+  });
+  return h + '</table></div>';
+}
+
+async function tabVars(p, counts) {
+  var vars = CACHE.vars[S.p] = await api('/api/projects/' + S.p + '/vars');
+  var h = '<div class="card"><div class="row"><div><b>Global 环境变量</b><div class="mut">项目内所有场景可用，场景里用 <code>${var:NAME}</code> 引用。优先级：项目 global &lt; 场景 variables &lt; --var。secret 加密存储，快照和日志一律脱敏。</div></div></div>';
+  h += '<table><tr><th style="width:22%">Key</th><th style="width:30%">Value</th><th>Secret</th><th>说明</th><th style="width:110px"></th></tr>';
+  vars.forEach(function (v, i) {
+    var shown = v.isSecret && !S.reveal[i] ? '••••••••' : v.value;
+    h += '<tr><td><code>' + esc(v.key) + '</code></td><td>' + esc(shown) + (v.isSecret ? ' <button class="link" onclick="S.reveal[' + i + ']=!S.reveal[' + i + '];render()">显示/隐藏</button>' : '') + '</td><td>' + (v.isSecret ? '是' : '') + '</td><td class="mut">' + esc(v.note) + '</td><td><button class="link" onclick="editVar(' + i + ')">编辑</button><button class="link" style="color:var(--bad)" onclick="delVar(' + i + ')">删除</button></td></tr>';
+  });
+  var e = S.edit != null ? vars[S.edit] || {} : null;
+  h += '<tr><td><input id="vk" placeholder="NEW_KEY" value="' + (e ? esc(e.key) : '') + '"' + (e ? ' readonly' : '') + '></td>'
+    + '<td><input id="vv" placeholder="value" value="' + (e && !e.isSecret ? esc(e.value) : '') + '" type="' + (e && e.isSecret ? 'password' : 'text') + '"></td>'
+    + '<td><input id="vs" type="checkbox" style="width:auto"' + (e && e.isSecret ? ' checked' : '') + '></td>'
+    + '<td><input id="vn" placeholder="说明（可选）" value="' + (e ? esc(e.note) : '') + '"></td>'
+    + '<td><button class="pri" onclick="saveVar()">' + (e ? '保存' : '添加') + '</button></td></tr>';
+  return h + '</table><div id="verr" class="err"></div></div>';
+}
+async function saveVar() {
+  var key = document.getElementById('vk').value.trim();
+  var input = { value: document.getElementById('vv').value, isSecret: document.getElementById('vs').checked, note: document.getElementById('vn').value };
+  try {
+    await api('/api/projects/' + S.p + '/vars/' + encodeURIComponent(key), j('PUT', input));
+    go({ edit: null, reveal: {} });
+  } catch (e) { document.getElementById('verr').textContent = e.message; }
+}
+function editVar(i) { go({ edit: i }); }
+async function delVar(i) {
+  var v = CACHE.vars[S.p][i];
+  if (!v) return;
+  if (!window.confirm('删除变量「' + v.key + '」？')) return;
+  await api('/api/projects/' + S.p + '/vars/' + encodeURIComponent(v.key), { method: 'DELETE' });
+  go({ edit: null, reveal: {} });
+}
+function tabGuards(p) {
+  var h = '<div class="card"><b>拦截的高危接口</b><div class="mut">命中后 route 层直接 abort，并写进 execution.log，场景判失败。</div><table style="margin-top:8px">';
+  (p.blockedRoutes.length ? p.blockedRoutes : ['（无）']).forEach(function (b) { h += '<tr><td><code>' + esc(b) + '</code></td></tr>'; });
+  h += '</table><div class="row" style="margin-top:12px"><input id="guard-new" placeholder="新增拦截规则，如 */admin/*"><button onclick="addGuard()">添加</button></div></div>';
+  h += '<div class="card"><b>数据前缀</b><div class="mut">测试数据命名前缀（如 E2E-），提示给 AI 生成场景时遵守。</div><div style="margin-top:8px"><code>' + esc(p.dataPrefix || '（未设置）') + '</code></div></div>';
+  return h;
+}
+async function addGuard() {
+  var v = document.getElementById('guard-new').value.trim();
+  var p = await api('/api/projects/' + S.p);
+  var routes = p.blockedRoutes.concat(v ? [v] : []);
+  await api('/api/projects/' + S.p + '/guards', j('PUT', { blockedRoutes: routes }));
+  render();
+}
+
+/* ---------- Run 详情 ---------- */
+function openRun(pid, runId) { go({ view: 'run', p: pid, run: runId, step: 0 }); }
+async function viewRun() {
+  var data = await api('/api/projects/' + S.p + '/runs/' + S.run);
+  var run = data.run, summary = data.summary;
+  if (run.status === 'running') {
+    if (!S.poll) S.poll = setInterval(function () { render(); }, 2000);
+    if (!summary) {
+      return { side: side({ name: run.scenarioName, baseUrl: '' }, {}), body: '<div class="card empty">执行中…每 2 秒自动刷新。</div>' };
+    }
+  }
+  var steps = (summary && summary.steps) || [];
+  var det = 0, ai = 0;
+  steps.forEach(function (s) { (s.assertions || []).forEach(function (a) { if (a.kind === 'det') det++; else ai++; }); });
+  var h = '<div class="crumb"><a onclick="home()">首页</a> / <a onclick="openProject(\'' + S.p + '\')">' + esc(S.p) + '</a> / Run ' + esc(run.id) + '</div>';
+  h += '<h2>' + esc(run.scenarioName) + ' ' + badge(run.status) + '</h2>';
+  h += '<div class="stat"><div><span class="mut">耗时</span><b>' + fmtMs(run.durationMs) + '</b></div><div><span class="mut">步骤</span><b>' + steps.length + '</b></div><div><span class="mut">断言（确定性 / AI）</span><b>' + det + ' / ' + ai + '</b></div><div><span class="mut">触发</span><b style="font-size:16px">' + esc(run.triggeredBy || '—') + '</b></div></div>';
+  h += '<div class="row" style="justify-content:flex-start"><a href="/api/projects/' + S.p + '/runs/' + S.run + '/files/report.html" target="_blank"><button>完整报告</button></a>'
+    + '<a href="/api/projects/' + S.p + '/runs/' + S.run + '/files/summary.json" target="_blank"><button>summary.json</button></a>'
+    + '<a href="/api/projects/' + S.p + '/runs/' + S.run + '/files/scenario.yaml" target="_blank"><button>scenario.yaml</button></a>'
+    + '<a href="/api/projects/' + S.p + '/runs/' + S.run + '/files/trace-' + esc(steps.length && steps[0].actor ? steps[0].actor : 'user') + '.zip"><button>trace.zip</button></a></div>';
+  if (S.step >= steps.length) S.step = Math.max(0, steps.length - 1);
+  var st = steps[S.step] || { id: '—', type: '', actor: '', expect: '', attempts: [], assertions: [], shots: [] };
+  h += '<div class="steps"><div class="card" style="padding:8px">';
+  steps.forEach(function (x, i) {
+    h += '<div class="st ' + (i === S.step ? 'on' : '') + '" onclick="go({step:' + i + '})"><span class="mut">' + String(i + 1).padStart(2, '0') + '</span> <b>' + esc(x.stepId) + '</b> ' + badge(x.status) + '<div class="mut">[' + esc(x.actor) + '] ' + esc(x.expect || '') + '</div></div>';
+  });
+  h += '</div><div><div class="card"><div class="row"><b>' + esc(st.stepId) + '</b><span class="mut">' + esc(st.type) + ' · 角色 ' + esc(st.actor) + ' · ' + fmtMs(st.ms || 0) + '</span></div>';
+  if (st.expect) h += '<div>验收点：' + esc(st.expect) + '</div>';
+  if (st.error) h += '<div class="err">' + esc(st.error) + '</div>';
+  (st.attempts || []).forEach(function (a, i) {
+    if ((st.attempts || []).length > 1 || !a.ok) {
+      h += '<div class="att ' + (a.ok ? '' : 'err') + '">#' + a.n + ' ' + (a.ok ? '成功' : '失败') + ' ' + fmtMs(a.ms || 0) + (a.error ? ' — ' + esc(a.error) : '') + '</div>';
+    }
+  });
+  h += '<div class="shots" style="margin-top:12px">';
+  (st.shots || []).forEach(function (f) {
+    h += '<figure><a href="/api/projects/' + S.p + '/runs/' + S.run + '/files/' + esc(f) + '" target="_blank"><img src="/api/projects/' + S.p + '/runs/' + S.run + '/files/' + esc(f) + '" loading="lazy" style="max-width:100%"></a><figcaption class="mut">' + esc(f) + '</figcaption></figure>';
+  });
+  if (!(st.shots || []).length) h += '<span class="mut">（本步没有截图）</span>';
+  h += '</div></div><div class="card"><b>断言</b><table style="margin-top:6px"><tr><th>类型</th><th>预期</th><th>实际</th><th>结果</th></tr>';
+  if (!(st.assertions || []).length) h += '<tr><td colspan="4" class="mut">（无断言）</td></tr>';
+  (st.assertions || []).forEach(function (a) {
+    h += '<tr><td>' + esc(a.type) + ' <span class="tag ' + a.kind + '">' + (a.kind === 'det' ? '确定性' : 'AI') + '</span></td><td>' + esc(a.expectedText) + '</td><td class="mut">' + esc(a.actualText) + '</td><td>' + (a.ok ? '✓' : '✗') + '</td></tr>';
+  });
+  h += '</table></div></div></div>';
+  return { side: side({ name: run.scenarioName, baseUrl: '' }, {}), body: h };
+}
+
+/* ---------- 渲染循环 ---------- */
+async function triggerRun(pid, file) {
+  try {
+    var r = await api('/api/projects/' + pid + '/runs', j('POST', { file: file, triggeredBy: 'web' }));
+    CACHE.runs[pid] = null;
+    openRun(pid, r.runId);
+  } catch (e) { window.alert('触发失败：' + e.message); }
+}
+function home() { go({ view: 'home', p: null }); }
+async function render() {
+  var app = document.getElementById('app'), sideEl = document.getElementById('side'), main = document.getElementById('main');
+  try {
+    if (S.view === 'home') {
+      app.className = 'app solo'; sideEl.hidden = true;
+      main.innerHTML = '<div class="home"><div class="mut">加载中…</div></div>';
+      main.innerHTML = await viewHome();
+      return;
+    }
+    var view = S.view === 'project' ? await viewProject() : await viewRun();
+    app.className = 'app'; sideEl.hidden = false;
+    sideEl.innerHTML = view.side;
+    main.innerHTML = view.body;
+  } catch (e) {
+    main.innerHTML = '<div class="card"><b>加载失败</b><div class="err">' + esc(e.message) + '</div><div class="mut">确认服务在运行：<code>pnpm tf serve</code></div></div>';
+  }
+}
+window.addEventListener('beforeunload', function () { if (S.poll) clearInterval(S.poll); });
+render();
+</script></body></html>

@@ -4,9 +4,12 @@ import { errOut, out } from "./io.js";
 import { openStore, DEFAULT_DB_PATH } from "../store/db.js";
 import { getProject, createProject, listProjects } from "../store/projects.js";
 import { setVar, listVars } from "../store/vars.js";
-import { runScenario } from "../runner/./runner.js";
+import { runScenario } from "../runner/runner.js";
+import { listRuns, getRun } from "../store/runs.js";
 import type { RunResult } from "../runner/types.js";
 import path from "node:path";
+
+const DEFAULT_DATA_DIR = path.dirname(DEFAULT_DB_PATH);
 
 interface RunOpts {
   project: string;
@@ -202,6 +205,87 @@ program
           ),
         );
       }
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("serve")
+  .description("启动 Web 控制台")
+  .option("--port <n>", "端口", "3300")
+  .option("--host <h>", "监听地址", "127.0.0.1")
+  .action(async (opts: { port: string; host: string }) => {
+    process.env.TESTFORGE_PORT = opts.port;
+    process.env.TESTFORGE_HOST = opts.host;
+    await import("../server/index.js");
+  });
+
+program
+  .command("runs")
+  .description("查看执行历史")
+  .option("-p, --project <id>", "按项目过滤")
+  .option("-s, --scenario <name>", "按场景过滤")
+  .option("-n, --limit <n>", "条数", "20")
+  .option("--json", "JSON 输出")
+  .action(async (opts: { project?: string; scenario?: string; limit: string; json?: boolean }) => {
+    const store = openStore();
+    try {
+      const rows = listRuns(store, {
+        projectId: opts.project,
+        scenarioId: opts.scenario,
+        limit: Number(opts.limit),
+      });
+      if (opts.json) {
+        out(JSON.stringify({ success: true, data: rows, error: null, meta: { total: rows.length } }, null, 2));
+        return;
+      }
+      if (rows.length === 0) {
+        out("（还没有执行记录）");
+        return;
+      }
+      for (const r of rows) {
+        out(`${r.id}\t${r.projectId}\t${r.scenarioName}\t${r.status}\t${r.durationMs}ms\t${r.triggeredBy || "-"}\t${r.startedAt}`);
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("report")
+  .description("打开执行报告")
+  .argument("[runId]", "缺省为最近一个 run")
+  .option("-p, --project <id>", "按项目过滤最近 run")
+  .action(async (runId: string | undefined, opts: { project?: string }) => {
+    const store = openStore();
+    try {
+      let id = runId;
+      if (id === undefined) {
+        const rows = listRuns(store, { projectId: opts.project, limit: 1 });
+        if (rows.length === 0) {
+          errOut("还没有执行记录");
+          process.exitCode = 1;
+          return;
+        }
+        id = rows[0]?.id;
+      }
+      if (id === undefined) {
+        errOut("找不到 run");
+        process.exitCode = 1;
+        return;
+      }
+      const run = getRun(store, id);
+      if (run === null) {
+        errOut(`run「${id}」不存在`);
+        process.exitCode = 1;
+        return;
+      }
+      const reportPath = path.join(DEFAULT_DATA_DIR, "projects", run.projectId, "runs", run.id, "report.html");
+      out(reportPath);
+      const { spawn } = await import("node:child_process");
+      const child = spawn("open", [reportPath], { stdio: "ignore", detached: true });
+      child.unref();
     } finally {
       store.close();
     }

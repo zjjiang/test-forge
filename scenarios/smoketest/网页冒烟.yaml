@@ -1,0 +1,15 @@
+name: 网页冒烟
+description: 打开页面、检查标题、点击链接后断言跳转
+version: 1
+actors:
+  user: {}
+steps:
+  - id: open
+    type: navigate
+    url: /
+    expect: 首页能打开，标题可见
+  - id: check-title
+    type: dom_assert
+    selector: "#t"
+    contains: smoke
+    expect: 标题包含 smoke

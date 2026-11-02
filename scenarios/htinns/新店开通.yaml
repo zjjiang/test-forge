@@ -1,0 +1,151 @@
+# htinns 试点场景：来自 htinns-test/scenarios/新店开通.md
+# 运行前提：htinns-server-v2 已启动；项目变量已配置 ADMIN_USER / ADMIN_PW(secret)
+# 数据卫生：写操作只落 E2E- 前缀店铺；teardown 停用场景店。
+name: 新店开通
+description: 管理员创建新店铺 → 退出 → 新店铺账号首次登录成功 → 清理停用
+version: 1
+actors:
+  admin:
+    description: 管理员账号
+  newshop:
+    description: 场景新建的店铺账号
+guards:
+  blockedRoutes:
+    - "*/maintain/push/run"
+    - "*/maintain/crawl"
+    - "*/maintain/calc/collect"
+    - "*/config/op"
+    - "*/config/import"
+steps:
+  - id: admin-login
+    as: admin
+    type: navigate
+    url: /login
+    expect: 登录页打开
+  - id: admin-fill-user
+    as: admin
+    type: fill
+    selector: 'input[name="username"]'
+    value: "${var:ADMIN_USER}"
+  - id: admin-fill-pw
+    as: admin
+    type: fill
+    selector: 'input[name="password"]'
+    value: "${var:ADMIN_PW}"
+  - id: admin-submit
+    as: admin
+    type: click
+    selector: 'form button[type="submit"]'
+    expect: admin 登录成功，顶栏出现
+  - id: admin-topbar
+    as: admin
+    type: dom_assert
+    selector: ".topbar .usermenu"
+    state: visible
+    expect: 顶栏用户菜单可见
+  - id: open-shop-page
+    as: admin
+    type: navigate
+    url: /settings/shop
+    expect: 店铺配置页渲染，列表可见
+  - id: shop-table
+    as: admin
+    type: dom_assert
+    selector: ".tbl tbody tr"
+    state: visible
+    expect: 店铺列表有数据行
+  - id: open-add-dialog
+    as: admin
+    type: click
+    selector: "#btn-add-shop"
+    expect: 新增店铺弹窗打开
+  - id: fill-shop-name
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="name"]'
+    value: "${var:E2E_SHOP_NAME}"
+  - id: fill-shop-user
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="username"]'
+    value: "${var:E2E_SHOP_USER}"
+  - id: fill-shop-pw
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="password"]'
+    value: "123456"
+  - id: submit-shop
+    as: admin
+    type: click
+    selector: "#adddlg button.btn"
+    expect: 提交创建
+  - id: flash-created
+    as: admin
+    type: dom_assert
+    selector: ".content .flash"
+    contains: 已创建
+    expect: flash 提示「已创建」
+  - id: shop-row-active
+    as: admin
+    type: ai_action
+    instruction: 在店铺列表里找到名为 ${var:E2E_SHOP_NAME} 的行，确认它的状态徽标显示「在营」
+    expect: 新店行出现且状态「在营」
+  - id: admin-logout
+    as: admin
+    type: ai_action
+    instruction: 悬停右上角用户菜单，点击退出登录
+    expect: 回到登录页
+  - id: newshop-login
+    as: newshop
+    type: navigate
+    url: /login
+    expect: 登录页打开
+  - id: newshop-fill-user
+    as: newshop
+    type: fill
+    selector: 'input[name="username"]'
+    value: "${var:E2E_SHOP_USER}"
+  - id: newshop-fill-pw
+    as: newshop
+    type: fill
+    selector: 'input[name="password"]'
+    value: "123456"
+  - id: newshop-submit
+    as: newshop
+    type: click
+    selector: 'form button[type="submit"]'
+    expect: 新店铺账号首次登录成功，进入控制台
+  - id: newshop-topbar
+    as: newshop
+    type: ai_action
+    instruction: 确认顶栏用户名显示的是 ${var:E2E_SHOP_NAME}
+    expect: 顶栏店名等于新店名
+teardown:
+  - id: cleanup-login
+    as: admin
+    type: navigate
+    url: /login
+    onFail: warn
+  - id: cleanup-fill-user
+    as: admin
+    type: fill
+    selector: 'input[name="username"]'
+    value: "${var:ADMIN_USER}"
+    onFail: warn
+  - id: cleanup-fill-pw
+    as: admin
+    type: fill
+    selector: 'input[name="password"]'
+    value: "${var:ADMIN_PW}"
+    onFail: warn
+  - id: cleanup-submit
+    as: admin
+    type: click
+    selector: 'form button[type="submit"]'
+    onFail: warn
+  - id: cleanup-deactivate
+    as: admin
+    type: ai_action
+    instruction: 在店铺配置页找到名为 ${var:E2E_SHOP_NAME} 的行，点击停用按钮并确认，状态变为「停用」
+    expect: 场景店停用留档
+    onFail: warn
