@@ -6,7 +6,7 @@
 /* Layout: 侧栏项目导航 + 右侧工作区；运行详情为「步骤轨道 | 证据面板」两栏，窄屏堆叠 */
 :root{
  --bg:#f4f5f7;--card:#ffffff;--line:#dde1e8;--fg:#1a2030;--mut:#5d6679;
- --pri:#2f5bd3;--pri-soft:#e9eefc;
+ --pri:#2f5bd3;--pri-soft:#e9eefc;--accent:#2f5bd3;
  --side:#151b29;--side-fg:#c3cad8;--side-on:#232c40;--side-mut:#78829a;
  --ok:#24804a;--bad:#c2362f;--rev:#b86a00;--skip:#79808c;
  --th:#f8f9fb;--code:#eef0f4;--warn-bg:#fff5e6;--warn-line:#f0cf9a;
@@ -17,12 +17,12 @@
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;
  --bg:#10141d;--card:#171c28;--line:#2a3142;--fg:#e3e7ef;--mut:#959eb2;
- --pri:#7f9cff;--pri-soft:#1f2a47;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
+ --pri:#7f9cff;--pri-soft:#1f2a47;--accent:#7f9cff;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
  --ok:#4cb877;--bad:#ef6b62;--rev:#e3a043;--skip:#8a919e;
  --th:#1b2130;--code:#222938;--warn-bg:#2b2213;--warn-line:#5c4518;--stripe-a:#1d2331;--stripe-b:#212839}}
 :root[data-theme="dark"]{color-scheme:dark;
  --bg:#10141d;--card:#171c28;--line:#2a3142;--fg:#e3e7ef;--mut:#959eb2;
- --pri:#7f9cff;--pri-soft:#1f2a47;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
+ --pri:#7f9cff;--pri-soft:#1f2a47;--accent:#7f9cff;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
  --ok:#4cb877;--bad:#ef6b62;--rev:#e3a043;--skip:#8a919e;
  --th:#1b2130;--code:#222938;--warn-bg:#2b2213;--warn-line:#5c4518;--stripe-a:#1d2331;--stripe-b:#212839}
 *{box-sizing:border-box}
@@ -96,13 +96,13 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .flow > .srow{grid-column:1/-1;font-size:12px;display:flex;gap:8px;align-items:baseline;border-bottom:1px dashed var(--line);padding:3px 2px}
 .flow .srow .mut{margin-left:auto;white-space:nowrap}
 .flow .srow b{white-space:nowrap}
-.flow details.small{margin-top:6px;font-size:12px}
-.flow details.small summary{cursor:pointer;color:var(--mut,#888);user-select:none;list-style:none}
+.flow details.small{margin-top:6px;font-size:13px}
+.flow details.small summary{cursor:pointer;color:var(--accent);font-weight:600;user-select:none;list-style:none}
 .flow details.small summary::before{content:'▸ ';}
 .flow details.small[open] summary::before{content:'▾ ';}
 .flow details.small .srow{border-bottom:1px dashed var(--line);padding:2px 0}
 .flow details.small .srow .mut{margin-left:auto;white-space:nowrap}
-.flow figcaption b{margin-right:6px}
+.flow figcaption b{margin-right:6px;font-size:13px}
 .shot{aspect-ratio:16/10;max-width:100%;background:repeating-linear-gradient(45deg,var(--stripe-a),var(--stripe-a) 10px,var(--stripe-b) 10px,var(--stripe-b) 20px);border:1px solid var(--line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--mut);font:12px var(--f-mono)}
 .att{font:12px var(--f-mono);margin-top:4px}
 #lb{position:fixed;inset:0;background:rgba(10,14,22,.86);display:flex;align-items:center;justify-content:center;z-index:50}
@@ -388,7 +388,7 @@ async function viewRun() {
     var cap = '<b>' + (g.si + 1) + '. ' + esc(g.st.stepId) + '</b>' + badge(g.st.status)
       + (g.st.expect && g.st.expect !== g.st.stepId ? '<span class="mut">' + esc(g.st.expect) + '</span>' : '');
     g.shots.forEach(function (f) {
-      var label = '步骤 ' + (g.si + 1) + ' ' + g.st.stepId + (g.st.expect && g.st.expect !== g.st.stepId ? ' — ' + g.st.expect : '');
+      var label = g.st.stepId + (g.st.expect && g.st.expect !== g.st.stepId ? ' — ' + g.st.expect : '');
       var idx = S.shots.length;
       S.shots.push({ src: base + f, caption: label + ' · ' + f });
       h += '<figure><img src="' + base + esc(f) + '" loading="lazy" style="max-width:100%;cursor:zoom-in" onclick="lbOpen(' + idx + ')" title="点击放大">'
@@ -459,7 +459,7 @@ function drawLb() {
   var s = S.shots[S.lb];
   lb.innerHTML = '<button class="lb-x" title="关闭 (Esc)" onclick="closeLb()">×</button>'
     + (S.shots.length > 1 ? '<button class="lb-nav lb-prev" title="上一张 (←)" onclick="lbGo(-1)"' + (S.lb === 0 ? ' disabled' : '') + '>‹</button><button class="lb-nav lb-next" title="下一张 (→)" onclick="lbGo(1)"' + (S.lb === S.shots.length - 1 ? ' disabled' : '') + '>›</button>' : '')
-    + '<figure><img src="' + esc(s.src) + '" alt=""><figcaption>' + esc(s.caption) + ' · ' + (S.lb + 1) + ' / ' + S.shots.length + '</figcaption></figure>';
+    + '<figure><img src="' + esc(s.src) + '" alt=""><figcaption><b>' + (S.lb + 1) + ' / ' + S.shots.length + '</b> · ' + esc(s.caption) + '</figcaption></figure>';
 }
 
 window.addEventListener('beforeunload', function () { if (S.poll) clearInterval(S.poll); });
