@@ -351,8 +351,9 @@ async function viewRun() {
   var seq = [];
   steps.forEach(function (st, si) {
     (st.shots || []).forEach(function (f) {
-      S.shots.push({ src: base + f, caption: '步骤 ' + (si + 1) + ' ' + st.stepId + ' · ' + f });
-      seq.push({ st: st, si: si, f: f });
+      var label = '步骤 ' + (si + 1) + ' ' + st.stepId + (st.expect && st.expect !== st.stepId ? ' — ' + st.expect : '');
+      S.shots.push({ src: base + f, caption: label + ' · ' + f });
+      seq.push({ st: st, si: si, f: f, label: label });
     });
   });
   var h = '<div class="crumb"><a onclick="home()">首页</a> / <a onclick="openProject(\'' + S.p + '\')">' + esc(S.p) + '</a> / Run ' + esc(run.id) + '</div>';
@@ -369,7 +370,9 @@ async function viewRun() {
   if (!seq.length) h += '<span class="mut">（本次执行没有截图）</span>';
   seq.forEach(function (it, n) {
     h += '<figure><img src="' + base + esc(it.f) + '" loading="lazy" style="max-width:100%;cursor:zoom-in" onclick="lbOpen(' + n + ')" title="点击放大">'
-      + '<figcaption><b>' + String(it.si + 1).padStart(2, '0') + ' ' + esc(it.st.stepId) + '</b>' + badge(it.st.status) + '<div class="mut">' + esc(it.f) + '</div></figcaption></figure>';
+      + '<figcaption><b>' + esc(it.st.stepId) + '</b>' + badge(it.st.status)
+      + (it.st.expect && it.st.expect !== it.st.stepId ? '<div>' + esc(it.st.expect) + '</div>' : '')
+      + '<div class="mut">' + esc(it.f) + '</div></figcaption></figure>';
   });
   h += '</div>';
   return { side: side({ name: run.scenarioName, baseUrl: '' }, {}), body: h };

@@ -23,210 +23,179 @@ guards:
     - "*/maintain/push/run"
 steps:
   # ---------- admin 登录 ----------
-  - id: a-login-open
+  - id: 管理员打开登录页
     as: admin
     type: navigate
     url: /login
-  - id: a-login-user
+  - id: 管理员填写账号
     as: admin
     type: fill
     selector: 'input[name="username"]'
     value: ${var:ADMIN_USER}
-  - id: a-login-pw
+  - id: 管理员填写密码
     as: admin
     type: fill
     selector: 'input[name="password"]'
     value: ${var:ADMIN_PW}
-  - id: a-login-submit
+  - id: 管理员提交登录
     as: admin
     type: click
     selector: 'form button[type="submit"]'
-  - id: a-login-topbar
+  - id: admin登录成功
     as: admin
     type: wait
     selector: '.topbar .usermenu'
     expect: admin 登录成功
   # ---------- H01 admin 默认列表 ----------
-  - id: h01-open
+  - id: 打开酒店管理页
     as: admin
     type: navigate
     url: /hotels
     expect: 打开酒店管理页
-  - id: h01-table
-    as: admin
-    type: wait
-    selector: '.tblwrap'
-  - id: h01-kpi
+  - id: KPI三卡齐备
     as: admin
     type: dom_assert
     selector: '.kpirow .kpi'
     count: 3
     expect: KPI 三卡齐备
-  - id: h01-new
+  - id: 新增入口可见
     as: admin
     type: dom_assert
     selector: '#btn-new'
     state: visible
     expect: 新增入口可见
-  - id: h01-import
+  - id: 导入入口可见
     as: admin
     type: dom_assert
     selector: '#btn-import'
     state: visible
     expect: 导入入口可见
-  - id: h01-export
+  - id: 导出入口可见
     as: admin
     type: dom_assert
     selector: 'a.chip[href*="/hotels/export"]'
     state: visible
     expect: 导出入口可见
-  - id: h01-note
+  - id: 计数条以「共」开头
     as: admin
     type: js_assert
     script: 'Array.from(document.querySelectorAll("p.note")).some((e) => e.textContent.trim().startsWith("共"))'
     truthy: true
     expect: 计数条以「共」开头
   # ---------- H02 admin 切店 ----------
-  - id: h02-open
+  - id: 打开酒店管理页
     as: admin
     type: navigate
     url: /hotels
-  - id: h02-select
+  - id: 切到新乡旅途（onchange自动提交）
     as: admin
     type: select
     selector: 'select[name="shop_id"]'
     value: "7"
     expect: 切到新乡旅途（onchange 自动提交）
-  - id: h02-rows
+  - id: 等酒店列表加载
     as: admin
     type: wait
     selector: '.tbl tbody tr'
-  - id: h02-count
+  - id: 新乡旅途有酒店行
     as: admin
     type: dom_assert
     selector: '.tbl tbody tr'
     countAtLeast: 1
     expect: 新乡旅途有酒店行
-  - id: h02-kpi
+  - id: KPI含在营酒店
     as: admin
     type: js_assert
     script: '(document.querySelector(".kpirow") || { textContent: "" }).textContent.includes("在营酒店")'
     truthy: true
     expect: KPI 含在营酒店
   # ---------- H03 admin 搜索 ----------
-  - id: h03-open
+  - id: 打开酒店搜索页
     as: admin
     type: navigate
     url: /hotels?shop_id=7
-  - id: h03-row
-    as: admin
-    type: wait
-    selector: '.tbl tbody tr'
-  - id: h03-extract
+  - id: 取首行酒店名作关键词
     as: admin
     type: extract
     selector: '.tbl tbody tr td b'
     into: hotel_kw
     expect: 取首行酒店名作关键词
-  - id: h03-fill
+  - id: 搜索框填关键词
     as: admin
     type: fill
     selector: 'form[action="/hotels"] input[name="q"]'
     value: ${var:hotel_kw}
-  - id: h03-enter
+  - id: 回车隐式提交
     as: admin
     type: press
     key: Enter
     expect: 回车隐式提交
-  - id: h03-loaded
-    as: admin
-    type: wait
-    selector: '.tblwrap table.tbl'
-  - id: h03-url
+  - id: URL带q参数
     as: admin
     type: js_assert
     script: 'location.href'
     contains: "q="
     expect: URL 带 q 参数
-  - id: h03-all-match
+  - id: 命中行名称均含关键词
     as: admin
     type: js_assert
     script: '(() => { const kw = "${var:hotel_kw}"; const rows = document.querySelectorAll(".tbl tbody tr"); return rows.length >= 1 && Array.from(rows).every((r) => ((r.querySelector("td b") || { textContent: "" }).textContent || "").includes(kw)); })()'
     truthy: true
     expect: 命中行名称均含关键词
   # ---------- H04 admin 标签筛选 ----------
-  - id: h04-open
+  - id: 打开黑名单标签筛选
     as: admin
     type: navigate
     url: /hotels?shop_id=7&tag=黑名单酒店
-  - id: h04-table
-    as: admin
-    type: wait
-    selector: '.tblwrap table.tbl'
-  - id: h04-check
+  - id: 黑名单筛选命中行状态一致（或空态）
     as: admin
     type: js_assert
     script: '(() => { const chips = Array.from(document.querySelectorAll("a.chip.on")).filter((c) => c.textContent.includes("黑名单")); if (chips.length !== 1) return false; const wrap = (document.querySelector(".tblwrap") || { textContent: "" }).textContent; const rows = document.querySelectorAll(".tbl tbody tr"); if (wrap.includes("该店暂无酒店配置")) return rows.length === 1; return Array.from(rows).every((r) => { const sel = r.querySelector("select.m-sel[name=status_tag]"); return sel !== null && !sel.disabled && sel.value === "黑名单酒店"; }); })()'
     truthy: true
     expect: 黑名单筛选命中行状态一致（或空态）
   # ---------- H05 分页与计数自洽 ----------
-  - id: h05-open
+  - id: 打开酒店分页
     as: admin
     type: navigate
     url: /hotels?shop_id=7
-  - id: h05-table
-    as: admin
-    type: wait
-    selector: '.tblwrap table.tbl'
-  - id: h05-math
+  - id: 「共N家·第X/Y页」与分页条互洽
     as: admin
     type: js_assert
     script: '(() => { const note = (Array.from(document.querySelectorAll("p.note")).map((e) => e.textContent.trim()).find((t) => t.startsWith("共"))) || ""; const m = note.match(/共\s*(\d+)\s*家/); const m2 = note.match(/第\s*(\d+)\s*\/\s*(\d+)\s*页/); if (m === null || m2 === null) return false; const total = Number(m[1]); const pages = Number(m2[2]); return Math.ceil(total / 20) === pages && (document.querySelector("nav.pager") !== null) === (total > 20); })()'
     truthy: true
     expect: 「共 N 家·第 X/Y 页」与分页条互洽
   # ---------- admin 创建 E2E 店 ----------
-  - id: mk-open
+  - id: 建店-打开店铺配置页
     as: admin
     type: navigate
     url: /settings/shop
-  - id: mk-table
-    as: admin
-    type: wait
-    selector: '.tblwrap table.tbl'
-  - id: mk-click-add
+  - id: 新增本场景的E2E店
     as: admin
     type: click
     selector: '#btn-add-shop'
+    waitFor: '#adddlg[open]'
     expect: 新增本场景的 E2E 店
-  - id: mk-dlg
-    as: admin
-    type: wait
-    selector: '#adddlg[open]'
-  - id: mk-name
+  - id: 建店-填写店铺名
     as: admin
     type: fill
     selector: '#adddlg input[name="name"]'
     value: ${var:shopName}
-  - id: mk-username
+  - id: 建店-填写店铺账号
     as: admin
     type: fill
     selector: '#adddlg input[name="username"]'
     value: ${var:shopUser}
-  - id: mk-submit
+  - id: 建店-保存
     as: admin
     type: click
     selector: '#adddlg button.btn'
-  - id: mk-flash
-    as: admin
-    type: wait
-    selector: '.content .flash'
-  - id: mk-flash-text
+  - id: E2E店创建成功
     as: admin
     type: dom_assert
     selector: '.content .flash'
     contains: 已创建
     expect: E2E 店创建成功
-  - id: mk-id
+  - id: 记录E2E店id
     as: admin
     type: extract
     selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-edit'
@@ -235,83 +204,71 @@ steps:
     into: shop_id
     expect: 记录 E2E 店 id
   # ---------- e2e 登录 ----------
-  - id: e-login-open
+  - id: 店铺账号打开登录页
     as: e2e
     type: navigate
     url: /login
-  - id: e-login-user
+  - id: 店铺账号填写用户名
     as: e2e
     type: fill
     selector: 'input[name="username"]'
     value: ${var:shopUser}
-  - id: e-login-pw
+  - id: 店铺账号填写密码
     as: e2e
     type: fill
     selector: 'input[name="password"]'
     value: "123456"
-  - id: e-login-submit
+  - id: 店铺账号提交登录
     as: e2e
     type: click
     selector: 'form button[type="submit"]'
-  - id: e-login-topbar
+  - id: E2E店身份登录成功
     as: e2e
     type: wait
     selector: '.topbar .usermenu'
     expect: E2E 店身份登录成功
   # ---------- H06 弹窗新增酒店 ----------
-  - id: h06-open
+  - id: 打开酒店列表（新增前）
     as: e2e
     type: navigate
     url: /hotels
-  - id: h06-new
-    as: e2e
-    type: wait
-    selector: '#btn-new'
-  - id: h06-click
+  - id: 打开新增酒店弹窗
     as: e2e
     type: click
     selector: '#btn-new'
     expect: 打开新增酒店弹窗
-  - id: h06-dlg
-    as: e2e
-    type: wait
-    selector: '#hoteldlg[open]'
-  - id: h06-name
+  - id: 填写酒店名称
     as: e2e
     type: fill
     selector: '#hoteldlg input[name="hotel_name"]'
     value: ${var:hotelName}
-  - id: h06-shid
+  - id: 填写飞猪SHID
     as: e2e
     type: fill
     selector: '#hoteldlg input[name="fliggy_shid"]'
     value: ${var:hotelShid}
-  - id: h06-city
+  - id: 填写城市郑州
     as: e2e
     type: fill
     selector: '#hoteldlg input[name="city_name"]'
     value: 郑州
-  - id: h06-submit
+  - id: 保存新酒店
     as: e2e
     type: click
     selector: '#hoteldlg button[type="submit"]'
-  - id: h06-flash
-    as: e2e
-    type: wait
-    selector: '.content .flash'
-  - id: h06-flash-text
+  - id: flash提示新增（或更新既有）
     as: e2e
     type: js_assert
     script: '(() => { const t = Array.from(document.querySelectorAll(".content .flash")).map((f) => f.textContent).join(""); return t.includes("已新增酒店") || t.includes("已更新既有酒店"); })()'
     truthy: true
     expect: flash 提示新增（或更新既有）
-  - id: h06-row
+  - id: 新酒店行恰1条
     as: e2e
     type: dom_assert
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}"))'
     count: 1
     expect: 新酒店行恰 1 条
-  - id: h06-id
+  - id: 记录酒店toggle地址
     as: e2e
     type: extract
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}")) form[action*="/toggle"]'
@@ -319,140 +276,112 @@ steps:
     into: hotel_action
     expect: 记录酒店 toggle 地址
   # ---------- H07 弹窗编辑酒店 ----------
-  - id: h07-open
+  - id: 打开酒店列表（编辑前）
     as: e2e
     type: navigate
     url: /hotels
-  - id: h07-row
-    as: e2e
-    type: wait
-    selector: '.tbl tbody tr'
-  - id: h07-edit
+  - id: 打开编辑弹窗
     as: e2e
     type: click
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}")) .btn-edit'
     expect: 打开编辑弹窗
-  - id: h07-dlg
-    as: e2e
-    type: wait
-    selector: '#hoteldlg[open]'
-  - id: h07-prefill
+  - id: 编辑弹窗预填当前值
     as: e2e
     type: dom_assert
     selector: '#hoteldlg input[name="hotel_name"]'
     value: ${var:hotelName}
     expect: 编辑弹窗预填当前值
-  - id: h07-city
+  - id: 修改城市洛阳
     as: e2e
     type: fill
     selector: '#hoteldlg input[name="city_name"]'
     value: 洛阳
-  - id: h07-submit
+  - id: 保存编辑
     as: e2e
     type: click
     selector: '#hoteldlg button[type="submit"]'
-  - id: h07-flash
-    as: e2e
-    type: wait
-    selector: '.content .flash'
-  - id: h07-flash-text
+  - id: flash提示已保存修改
     as: e2e
     type: dom_assert
     selector: '.content .flash'
     contains: 已保存修改
     expect: flash 提示已保存修改
-  - id: h07-verify
+  - id: 行内城市更新为洛阳
     as: e2e
     type: dom_assert
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}")) td:first-child'
     contains: 洛阳
     expect: 行内城市更新为洛阳
   # ---------- H08 行内打标 ----------
-  - id: h08-open
+  - id: 打开酒店列表（打标前）
     as: e2e
     type: navigate
     url: /hotels
-  - id: h08-row
+  - id: 等列表加载（打标前）
     as: e2e
     type: wait
     selector: '.tbl tbody tr'
-  - id: h08-tag
+  - id: 行内状态下拉选优质酒店（onchange即存）
     as: e2e
     type: select
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}")) select.m-sel[name="status_tag"]'
     value: 优质酒店
     expect: 行内状态下拉选优质酒店（onchange 即存）
-  - id: h08-flash
-    as: e2e
-    type: wait
-    selector: '.content .flash'
-  - id: h08-flash-1
+  - id: 校验打标提示条
     as: e2e
     type: dom_assert
     selector: '.content .flash'
     contains: 已更新
-  - id: h08-flash-2
+  - id: flash提示已更新标签
     as: e2e
     type: dom_assert
     selector: '.content .flash'
     contains: 标签
     expect: flash 提示已更新标签
-  - id: h08-loaded
-    as: e2e
-    type: wait
-    selector: '.tbl tbody tr'
-  - id: h08-verify
+  - id: 标签落库回显
     as: e2e
     type: dom_assert
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}")) select.m-sel[name="status_tag"]'
     value: 优质酒店
     expect: 标签落库回显
   # ---------- H09 停用与再启用 ----------
-  - id: h09-open
+  - id: 打开酒店列表（停用前）
     as: e2e
     type: navigate
     url: /hotels
-  - id: h09-row
+  - id: 等列表加载（停用前）
     as: e2e
     type: wait
     selector: '.tbl tbody tr'
-  - id: h09-disable
+  - id: 行内停用（无confirm）
     as: e2e
     type: click
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}")) button:has-text("停用")'
     expect: 行内停用（无 confirm）
-  - id: h09-flash
-    as: e2e
-    type: wait
-    selector: '.content .flash'
-  - id: h09-flash-text
+  - id: flash提示已停用
     as: e2e
     type: dom_assert
     selector: '.content .flash'
     contains: 已停用
     expect: flash 提示已停用
-  - id: h09-enable-btn
+  - id: 按钮翻转为启用
     as: e2e
     type: dom_assert
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}")) button:has-text("启用")'
     count: 1
     expect: 按钮翻转为启用
-  - id: h09-enable
+  - id: 点击启用恢复
     as: e2e
     type: click
     selector: '.tbl tbody tr:has(td b:text-is("${var:hotelName}")) button:has-text("启用")'
-  - id: h09-flash2
-    as: e2e
-    type: wait
-    selector: '.content .flash'
-  - id: h09-flash2-text
+  - id: flash提示已启用
     as: e2e
     type: dom_assert
     selector: '.content .flash'
     contains: 已启用
     expect: flash 提示已启用
   # ---------- H10 导出 CSV ----------
-  - id: h10-export
+  - id: 导出CSV文件名与表头
     as: e2e
     type: download
     click: 'a.chip[href*="/hotels/export"]'
@@ -461,62 +390,48 @@ steps:
     headerContains: 酒店名称
     expect: 导出 CSV 文件名与表头
   # ---------- H11 新增弹窗（已知 bug，缺陷证据） ----------
-  - id: h11-open
+  - id: 打开新增弹窗（已知缺陷）
     as: admin
     type: navigate
     url: /hotels?shop_id=7
-  - id: h11-btn
-    as: admin
-    type: wait
-    selector: '#btn-new'
-  - id: h11-click
+  - id: 点击新增（list.html残留代码致脚本语法错误）
     as: admin
     type: click
     selector: '#btn-new'
-    expect: 点击新增（list.html 残留代码致脚本语法错误）
-  - id: h11-dlg
-    as: admin
-    type: wait
-    selector: '#hoteldlg[open]'
+    waitFor: '#hoteldlg[open]'
     timeoutMs: 3000
-    onFail: warn
-    expect: 弹窗打开——已知 bug：当前预期失败，作缺陷证据
-  # ---------- HS01 非 admin 仅本店 ----------
-  - id: hs01-open
+    expect: 点击新增（list.html 残留代码致脚本语法错误）
+  - id: 打开酒店列表（切店前）
     as: e2e
     type: navigate
     url: /hotels
-  - id: hs01-table
-    as: e2e
-    type: wait
-    selector: '.tblwrap table.tbl'
-  - id: hs01-no-sel
+  - id: 店铺下拉为空壳（无选项）
     as: e2e
     type: js_assert
     script: 'document.querySelectorAll("select[name=shop_id] option").length'
     equals: 0
     expect: 店铺下拉为空壳（无选项）
-  - id: hs01-rows
+  - id: 只看到本店酒店行
     as: e2e
     type: dom_assert
     selector: '.tbl tbody tr'
     countAtLeast: 1
     expect: 只看到本店酒店行
-  - id: hs01-not-empty
+  - id: 非空态
     as: e2e
     type: js_assert
     script: '!(document.querySelector(".tblwrap") || { textContent: "" }).textContent.includes("该店暂无酒店配置")'
     truthy: true
     expect: 非空态
   # ---------- HS02 跨店 404 ----------
-  - id: hs02-get
+  - id: 越权编辑页404
     as: e2e
     type: http
     method: GET
     path: /hotels/1/edit
     expectStatus: 404
     expect: 越权编辑页 404
-  - id: hs02-post
+  - id: 越权更新接口404
     as: e2e
     type: http
     method: POST
@@ -527,7 +442,7 @@ steps:
     expectStatus: 404
     expect: 越权更新接口 404
   # ---------- HS03 打标非法值 ----------
-  - id: hs03-tag
+  - id: 非法标签302重定向
     as: e2e
     type: http
     method: POST
@@ -540,58 +455,54 @@ steps:
     maxRedirects: 0
     expectStatus: 302
     expect: 非法标签 302 重定向
-  - id: hs03-open
+  - id: 打开酒店列表（切店后）
     as: e2e
     type: navigate
     url: /hotels
-  - id: hs03-flash
-    as: e2e
-    type: wait
-    selector: '.content .flash'
-  - id: hs03-flash-text
+  - id: flash提示非法标签
     as: e2e
     type: dom_assert
     selector: '.content .flash'
     contains: 非法status_tag
     expect: flash 提示非法标签
-  - id: hs03-danger
+  - id: 错误级别danger
     as: e2e
     type: dom_assert
     selector: '.content .flash.danger'
     state: visible
     expect: 错误级别 danger
 teardown:
-  - id: td-login-open
+  - id: 收尾打开登录页
     as: admin
     type: navigate
     url: /login
-  - id: td-login-user
+  - id: 收尾填写账号
     as: admin
     type: fill
     selector: 'input[name="username"]'
     value: ${var:ADMIN_USER}
-  - id: td-login-pw
+  - id: 收尾填写密码
     as: admin
     type: fill
     selector: 'input[name="password"]'
     value: ${var:ADMIN_PW}
-  - id: td-login-submit
+  - id: 收尾提交登录
     as: admin
     type: click
     selector: 'form button[type="submit"]'
-  - id: td-topbar
+  - id: 收尾等登录完成
     as: admin
     type: wait
     selector: '.topbar .usermenu'
-  - id: td-open
+  - id: 收尾打开店铺配置页
     as: admin
     type: navigate
     url: /settings/shop
-  - id: td-table
+  - id: 收尾等列表加载
     as: admin
     type: wait
     selector: '.tblwrap table.tbl'
-  - id: td-toggle
+  - id: 停用E2E店留档（仅当仍在营）
     as: admin
     type: click
     selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'

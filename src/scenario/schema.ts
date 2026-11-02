@@ -9,6 +9,13 @@ const slugKey = z
   .max(64)
   .regex(/^[a-z][a-z0-9_-]*$/, "只允许小写字母开头，小写字母/数字/下划线/短横线");
 
+/** 步骤 id 允许中文等任意非空白字符（展示与截图文件名用），actor 名/变量名仍用 slugKey */
+const stepIdKey = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^\S+$/, "不能包含空格");
+
 const httpMethod = z.enum([
   "GET",
   "POST",
@@ -49,7 +56,7 @@ const mock = z
   );
 
 const stepCommon = {
-  id: slugKey.optional(),
+  id: stepIdKey.optional(),
   /** 以哪个 actor 的上下文执行本步骤 */
   as: slugKey.optional(),
   /** 人话验收点，进报告作为该步截图的说明 */
@@ -73,6 +80,8 @@ const stepSchema = z.discriminatedUnion("type", [
     ...stepCommon,
     type: z.literal("click"),
     selector: z.string().min(1),
+    /** 点击后等待出现的选择器（弹窗/跳转落地页），出现后留一张截图 */
+    waitFor: z.string().min(1).optional(),
   }),
   z.object({
     ...stepCommon,
@@ -140,11 +149,13 @@ const stepSchema = z.discriminatedUnion("type", [
     value: z.string().optional(),
     /** option 的可见文本 */
     label: z.string().optional(),
+    waitFor: z.string().min(1).optional(),
   }),
   z.object({
     ...stepCommon,
     type: z.literal("hover"),
     selector: z.string().min(1),
+    waitFor: z.string().min(1).optional(),
   }),
   z.object({
     ...stepCommon,

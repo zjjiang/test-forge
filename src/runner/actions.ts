@@ -58,16 +58,20 @@ async function assertDom(page: Page, step: Extract<Step, { type: "dom_assert" }>
   }
   const loc = page.locator(step.selector).first();
   if (step.value !== undefined) {
+    await loc.waitFor({ state: "visible", timeout: step.timeoutMs ?? 5000 });
     const actual = await loc.inputValue().catch(() => "");
     if (actual !== step.value)
       return `输入值期望「${step.value}」实际「${actual}」`;
     return "";
   }
   if (step.state !== undefined) {
+    if (step.state === "visible") {
+      await loc.waitFor({ state: "visible", timeout: step.timeoutMs ?? 5000 }).catch(() => undefined);
+    }
     const ok = await checkLocatorState(loc, step.state);
     return ok ? "" : `元素 ${step.selector} 不满足状态 ${step.state}`;
   }
-  await loc.waitFor({ state: "attached", timeout: 5000 });
+  await loc.waitFor({ state: "visible", timeout: step.timeoutMs ?? 5000 });
   const text = await loc.innerText().catch(() => "");
   if (step.text !== undefined && text !== step.text) {
     return `文本不一致: 期望「${step.text}」实际「${text.trim()}」`;
@@ -170,11 +174,14 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
         case "navigate": {
           await page.goto(new URL(step.url, ctx.baseUrl).href, { waitUntil: step.waitUntil ?? "load", timeout: timeoutMs(step, ctx) });
           record(out, step, "det", `打开 ${step.url}`, page.url(), true);
+          await ctx.shot(step.id ?? step.type, "after");
           return true;
         }
         case "click": {
           await page.click(step.selector, { timeout: ctx.stepTimeoutMs });
+          if (step.waitFor !== undefined) await page.waitForSelector(step.waitFor, { timeout: timeoutMs(step, ctx), state: "visible" });
           record(out, step, "det", `点击 ${step.selector}`, "clicked", true);
+          if (step.waitFor !== undefined) await ctx.shot(step.id ?? step.type, "after");
           return true;
         }
         case "fill": {
@@ -225,12 +232,16 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
         case "select": {
           const opt = step.value !== undefined ? { value: step.value } : { label: step.label ?? "" };
           await page.selectOption(step.selector, opt, { timeout: ctx.stepTimeoutMs });
+          if (step.waitFor !== undefined) await page.waitForSelector(step.waitFor, { timeout: timeoutMs(step, ctx), state: "visible" });
           record(out, step, "det", `选择 ${step.selector}`, step.value !== undefined ? `value=${step.value}` : `label=${step.label}`, true);
+          if (step.waitFor !== undefined) await ctx.shot(step.id ?? step.type, "after");
           return true;
         }
         case "hover": {
           await page.hover(step.selector, { timeout: ctx.stepTimeoutMs });
+          if (step.waitFor !== undefined) await page.waitForSelector(step.waitFor, { timeout: timeoutMs(step, ctx), state: "visible" });
           record(out, step, "det", `悬停 ${step.selector}`, "hovered", true);
+          if (step.waitFor !== undefined) await ctx.shot(step.id ?? step.type, "after");
           return true;
         }
         case "extract": {
@@ -334,7 +345,6 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
   const maxAttempts = step.type === "ai_action" ? step.retries + 1 : 1;
   for (let n = 1; n <= maxAttempts; n++) {
     const a0 = Date.now();
-    await ctx.shot(step.id ?? step.type, "before");
     const ok = await attempt(n);
     out.attempts.push({ n, ok, error: ok ? "" : out.error, ms: Date.now() - a0 });
     if (ok) break;
