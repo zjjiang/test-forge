@@ -182,23 +182,33 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
     if (!loaded.result.ok) return rep.code(400).send({ ...fail(loaded.result.issues.join("; "), 400) });
     const scenario = loaded.result.scenario;
     const resolved = scenario.baseUrl !== undefined ? scenario : { ...scenario, baseUrl: project.baseUrl };
-    const pendingRun = runScenario({
+    let runId = "";
+    void runScenario({
       store,
       dataDir,
       scenario: resolved,
       scenarioPath: filePath,
       projectId: id,
       triggeredBy: b.triggeredBy ?? "web",
-    });
-    void pendingRun
-      .then(async (r) => {
+      onStart: (started) => {
+        runId = started;
+      },
+    })
+      .then((r) => {
         pending.delete("runId" in r ? r.runId : r.run.id);
       })
-      .catch(() => undefined);
-    const runId = await pendingRun
-      .then((r) => ("runId" in r ? r.runId : r.run.id))
-      .catch(() => "");
-    if (runId === "") return rep.code(500).send(fail("run failed to start", 500));
+      .catch((e: unknown) => {
+        pending.delete(runId);
+        app.log.error(`run ${runId} failed: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    // runScenario 的 run 记录在首个 await 前落库，微任务里 runId 一定已就绪
+    await new Promise<void>((resolve) => {
+      const check = (): void => {
+        if (runId !== "") resolve();
+        else setImmediate(check);
+      };
+      check();
+    });
     return rep.code(202).send(ok({ runId }));
   });
 

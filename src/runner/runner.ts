@@ -26,6 +26,8 @@ export interface RunOptions {
   /** CLI --var 覆盖，优先级最高 */
   varsOverride?: Record<string, string>;
   headless?: boolean;
+  /** run 记录落库后立刻回调（浏览器还没启动），供 API 即时返回 runId */
+  onStart?: (runId: string) => void;
 }
 
 export interface SkipInfo {
@@ -58,6 +60,7 @@ export async function runScenario(
     scenarioName: scenario.name,
     triggeredBy: opts.triggeredBy,
   });
+  opts.onStart?.(run.id);
   const evidence = new Evidence(opts.dataDir, run.id, opts.projectId);
   if (opts.scenarioPath !== undefined) {
     try {

@@ -209,9 +209,9 @@ async function tabScenarios(p, counts) {
       return;
     }
     var last = s.lastRun;
-    h += '<tr><td><b>' + esc(s.name) + '</b><div class="mut">' + esc(s.file) + '</div></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
+    h += '<tr><td><b title="' + esc(s.file) + '">' + esc(s.name) + '</b></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
       + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
-      + '<td><button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\')">运行</button></td></tr>';
+      + '<td><button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
   });
   return h + '</table></div>';
 }
@@ -281,7 +281,7 @@ async function viewRun() {
   if (run.status === 'running') {
     if (!S.poll) S.poll = setInterval(function () { render(); }, 2000);
     if (!summary) {
-      return { side: side({ name: run.scenarioName, baseUrl: '' }, {}), body: '<div class="card empty">执行中…每 2 秒自动刷新。</div>' };
+      return { side: side({ name: run.scenarioName, baseUrl: '' }, {}), body: '<div class="card empty"><h2>执行中… ' + badge('running') + '</h2><div class="mut">浏览器正在执行场景，每 2 秒自动刷新；完成后自动显示步骤和截图。</div></div>' };
     }
   }
   var steps = (summary && summary.steps) || [];
@@ -323,12 +323,17 @@ async function viewRun() {
 }
 
 /* ---------- 渲染循环 ---------- */
-async function triggerRun(pid, file) {
+async function triggerRun(pid, file, btn) {
+  var old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '启动中…'; }
   try {
     var r = await api('/api/projects/' + pid + '/runs', j('POST', { file: file, triggeredBy: 'web' }));
     CACHE.runs[pid] = null;
     openRun(pid, r.runId);
-  } catch (e) { window.alert('触发失败：' + e.message); }
+  } catch (e) {
+    window.alert('触发失败：' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
 }
 function home() { go({ view: 'home', p: null }); }
 async function render() {
