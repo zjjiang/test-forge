@@ -13,6 +13,7 @@ import { Evidence } from "./evidence.js";
 import { renderReport } from "../evidence/report.js";
 import { verdict } from "./verdict.js";
 import { midsceneConfigured, createMidsceneDriver } from "./midscene.js";
+import { resolveAiEnv } from "../ai/glm.js";
 import type { RunResult, StepResult, StepStatus } from "./types.js";
 
 export interface RunOptions {
@@ -121,11 +122,14 @@ export async function runScenario(
   const actorNames = Object.keys(scenario.actors);
   const runtimes = new Map<string, ActorRuntime>();
   let ai: AIDriver | null = null;
-  if (midsceneConfigured()) {
-    ai = await createMidsceneDriver();
+  const aiEnv = resolveAiEnv(store, snap.values);
+  if (midsceneConfigured(aiEnv)) {
+    ai = await createMidsceneDriver(aiEnv);
     log("AI Midscene driver ready");
   } else {
-    log("AI Midscene 未配置：ai_action / visual_assert 将失败");
+    log(
+      "AI Midscene 未配置：在首页「AI 配置」里填模型名 / Base URL / API Key 后可用",
+    );
   }
   const stepTimeoutMs = scenario.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const startedAt = new Date().toISOString();

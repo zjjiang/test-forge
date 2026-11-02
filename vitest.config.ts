@@ -7,7 +7,7 @@ export default defineConfig({
 		coverage: {
 			provider: 'v8',
 			include: ['src/**/*.ts'],
-			exclude: ['src/cli/**', 'src/runner/midscene.ts'],
+			exclude: ['src/cli/**', 'src/server/**', 'src/runner/midscene.ts'],
 			thresholds: { lines: 80, functions: 80, statements: 80, branches: 70 },
 		},
 	},

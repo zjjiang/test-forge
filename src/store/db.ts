@@ -53,6 +53,14 @@ const MIGRATIONS: string[][] = [
     "  duration_ms INTEGER NOT NULL DEFAULT 0",
     ");",
   ],
+  [
+    "CREATE TABLE settings (",
+    "  key TEXT PRIMARY KEY,",
+    "  value BLOB NOT NULL,",
+    "  is_secret INTEGER NOT NULL DEFAULT 0,",
+    "  updated_at TEXT NOT NULL",
+    ");",
+  ],
 ];
 
 export function openStore(dbPath: string = DEFAULT_DB_PATH): Store {

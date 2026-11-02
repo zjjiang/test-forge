@@ -1,44 +1,57 @@
-import path from 'node:path';
-import fs from 'node:fs';
-import Fastify, { type FastifyInstance } from 'fastify';
-import fastifyStatic from '@fastify/static';
-import { openStore, DEFAULT_DB_PATH } from '../store/db.js';
+import path from "node:path";
+import fs from "node:fs";
+import Fastify, { type FastifyInstance } from "fastify";
+import fastifyStatic from "@fastify/static";
+import { openStore, DEFAULT_DB_PATH } from "../store/db.js";
 import {
-	createProject,
-	deleteProject,
-	getProject,
-	listProjects,
-	updateProject,
-	ProjectInputError,
-} from '../store/projects.js';
-import { deleteVar, listVars, setVar, VarInputError } from '../store/vars.js';
-import { listRuns, getRun } from '../store/runs.js';
-import { loadScenarioFile } from '../scenario/loader.js';
-import { runScenario, type SkipInfo } from '../runner/runner.js';
-import type { RunResult } from '../runner/types.js';
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  updateProject,
+  ProjectInputError,
+} from "../store/projects.js";
+import { deleteVar, listVars, setVar, VarInputError } from "../store/vars.js";
+import {
+  aiSettingsEnv,
+  aiSettingsView,
+  setSetting,
+  SettingInputError,
+} from "../store/settings.js";
+import { aiConfigFrom, testAi } from "../ai/glm.js";
+import { listRuns, getRun } from "../store/runs.js";
+import { loadScenarioFile } from "../scenario/loader.js";
+import { runScenario, type SkipInfo } from "../runner/runner.js";
+import type { RunResult } from "../runner/types.js";
 
 export interface ApiOptions {
-	dbPath?: string;
-	/** 场景 YAML 根目录：<root>/<projectId>/*.yaml */
-	scenariosDir?: string;
-	dataDir?: string;
+  dbPath?: string;
+  /** 场景 YAML 根目录：<root>/<projectId>/*.yaml */
+  scenariosDir?: string;
+  dataDir?: string;
 }
 
 interface PendingRun {
-	promise: Promise<RunResult | SkipInfo>;
+  promise: Promise<RunResult | SkipInfo>;
 }
 
-const ok = <T>(data: T, meta: Record<string, unknown> = {}): { success: true; data: T; error: null; meta: Record<string, unknown> } => ({
-	success: true,
-	data,
-	error: null,
-	meta,
+const ok = <T>(
+  data: T,
+  meta: Record<string, unknown> = {},
+): { success: true; data: T; error: null; meta: Record<string, unknown> } => ({
+  success: true,
+  data,
+  error: null,
+  meta,
 });
-const fail = (error: string, code = 400): { success: false; data: null; error: string; code: number } => ({
-	success: false,
-	data: null,
-	error,
-	code,
+const fail = (
+  error: string,
+  code = 400,
+): { success: false; data: null; error: string; code: number } => ({
+  success: false,
+  data: null,
+  error,
+  code,
 });
 
 export function buildApp(opts: ApiOptions = {}): FastifyInstance {
@@ -59,7 +72,12 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
     try {
       return ok(handler());
     } catch (e) {
-      if (e instanceof ProjectInputError || e instanceof VarInputError) return fail(e.message, 400);
+      if (
+        e instanceof ProjectInputError ||
+        e instanceof VarInputError ||
+        e instanceof SettingInputError
+      )
+        return fail(e.message, 400);
       return fail(e instanceof Error ? e.message : String(e), 500);
     }
   };
@@ -73,10 +91,14 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
       const p = createProject(store, {
         id: String(b.id ?? ""),
         name: String(b.name ?? ""),
-        description: b.description === undefined ? undefined : String(b.description),
+        description:
+          b.description === undefined ? undefined : String(b.description),
         baseUrl: String(b.baseUrl ?? ""),
-        blockedRoutes: Array.isArray(b.blockedRoutes) ? (b.blockedRoutes as string[]) : undefined,
-        dataPrefix: b.dataPrefix === undefined ? undefined : String(b.dataPrefix),
+        blockedRoutes: Array.isArray(b.blockedRoutes)
+          ? (b.blockedRoutes as string[])
+          : undefined,
+        dataPrefix:
+          b.dataPrefix === undefined ? undefined : String(b.dataPrefix),
       });
       return p;
     });
@@ -94,7 +116,8 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
     const id = (req.params as { id: string }).id;
     const b = req.body as { blockedRoutes?: string[]; dataPrefix?: string };
     return envelope(() => {
-      if (getProject(store, id) === null) throw new ProjectInputError("project not found");
+      if (getProject(store, id) === null)
+        throw new ProjectInputError("project not found");
       return updateProject(store, id, {
         blockedRoutes: b.blockedRoutes,
         dataPrefix: b.dataPrefix,
@@ -103,7 +126,9 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
   });
 
   app.delete("/api/projects/:id", async (req) => {
-    return envelope(() => ({ deleted: deleteProject(store, (req.params as { id: string }).id) }));
+    return envelope(() => ({
+      deleted: deleteProject(store, (req.params as { id: string }).id),
+    }));
   });
 
   // ---- vars ----
@@ -114,9 +139,15 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
   app.put("/api/projects/:id/vars/:key", async (req, rep) => {
     const { id, key } = req.params as { id: string; key: string };
     const b = req.body as { value?: string; isSecret?: boolean; note?: string };
-    if (typeof b.value !== "string") return rep.code(400).send(fail("value is required", 400));
+    if (typeof b.value !== "string")
+      return rep.code(400).send(fail("value is required", 400));
     return envelope(() => {
-      setVar(store, id, { key, value: b.value ?? "", isSecret: b.isSecret === true, note: b.note ?? "" });
+      setVar(store, id, {
+        key,
+        value: b.value ?? "",
+        isSecret: b.isSecret === true,
+        note: b.note ?? "",
+      });
       return { key };
     });
   });
@@ -140,7 +171,11 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
       const loaded = await loadScenarioFile(path.join(dir, f));
       if (loaded.result.ok) {
         const s = loaded.result.scenario;
-        const lastRun = listRuns(store, { projectId: id, scenarioId: s.name, limit: 1 })[0];
+        const lastRun = listRuns(store, {
+          projectId: id,
+          scenarioId: s.name,
+          limit: 1,
+        })[0];
         items.push({
           file: f,
           name: s.name,
@@ -152,10 +187,46 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
           lastRun: lastRun ?? null,
         });
       } else {
-        items.push({ file: f, name: f, actors: [], steps: 0, requires: [], valid: false, issues: loaded.result.issues, lastRun: null });
+        items.push({
+          file: f,
+          name: f,
+          actors: [],
+          steps: 0,
+          requires: [],
+          valid: false,
+          issues: loaded.result.issues,
+          lastRun: null,
+        });
       }
     }
     return ok(items, { total: items.length });
+  });
+
+  // ---- global AI (Midscene/GLM) settings ----
+  app.get("/api/ai", async () => ok(aiSettingsView(store)));
+
+  app.put("/api/ai", async (req) => {
+    const b = req.body as Record<string, unknown>;
+    return envelope(() => {
+      const s = (k: string): string => String(b[k] ?? "").trim();
+      if (b.family !== undefined)
+        setSetting(store, "MIDSCENE_MODEL_FAMILY", s("family") || "glm-v");
+      if (b.model !== undefined)
+        setSetting(store, "MIDSCENE_MODEL_NAME", s("model"));
+      if (b.baseUrl !== undefined)
+        setSetting(store, "MIDSCENE_MODEL_BASE_URL", s("baseUrl"));
+      if (b.apiKey !== undefined && s("apiKey") !== "")
+        setSetting(store, "MIDSCENE_MODEL_API_KEY", s("apiKey"));
+      return aiSettingsView(store);
+    });
+  });
+
+  /** 用当前生效配置（全局 + 环境变量兜底）发一次真实请求验证连通。 */
+  app.post("/api/ai/test", async () => {
+    const env = { ...aiSettingsEnv(store) };
+    const cfg = aiConfigFrom(env);
+    const r = await testAi(cfg);
+    return ok(r);
   });
 
   // ---- runs ----
@@ -167,21 +238,35 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
   app.get("/api/projects/:id/runs", async (req) => {
     const id = (req.params as { id: string }).id;
     const q = req.query as { scenario?: string; limit?: string };
-    return envelope(() => listRuns(store, { projectId: id, scenarioId: q.scenario, limit: Number(q.limit ?? 50) }));
+    return envelope(() =>
+      listRuns(store, {
+        projectId: id,
+        scenarioId: q.scenario,
+        limit: Number(q.limit ?? 50),
+      }),
+    );
   });
 
   app.post("/api/projects/:id/runs", async (req, rep) => {
     const id = (req.params as { id: string }).id;
     const b = req.body as { file?: string; triggeredBy?: string };
     const project = getProject(store, id);
-    if (project === null) return rep.code(404).send(fail("project not found", 404));
+    if (project === null)
+      return rep.code(404).send(fail("project not found", 404));
     const file = b.file ?? "";
-    if (file.includes("..") || file.includes("/")) return rep.code(400).send(fail("file must be a bare file name", 400));
+    if (file.includes("..") || file.includes("/"))
+      return rep.code(400).send(fail("file must be a bare file name", 400));
     const filePath = path.join(scenariosDir, id, file);
     const loaded = await loadScenarioFile(filePath);
-    if (!loaded.result.ok) return rep.code(400).send({ ...fail(loaded.result.issues.join("; "), 400) });
+    if (!loaded.result.ok)
+      return rep
+        .code(400)
+        .send({ ...fail(loaded.result.issues.join("; "), 400) });
     const scenario = loaded.result.scenario;
-    const resolved = scenario.baseUrl !== undefined ? scenario : { ...scenario, baseUrl: project.baseUrl };
+    const resolved =
+      scenario.baseUrl !== undefined
+        ? scenario
+        : { ...scenario, baseUrl: project.baseUrl };
     let runId = "";
     void runScenario({
       store,
@@ -199,7 +284,9 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
       })
       .catch((e: unknown) => {
         pending.delete(runId);
-        app.log.error(`run ${runId} failed: ${e instanceof Error ? e.message : String(e)}`);
+        app.log.error(
+          `run ${runId} failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
       });
     // runScenario 的 run 记录在首个 await 前落库，微任务里 runId 一定已就绪
     await new Promise<void>((resolve) => {
@@ -215,11 +302,14 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
   app.get("/api/projects/:id/runs/:runId", async (req, rep) => {
     const { id, runId } = req.params as { id: string; runId: string };
     const run = getRun(store, runId);
-    if (run === null || run.projectId !== id) return rep.code(404).send(fail("run not found", 404));
+    if (run === null || run.projectId !== id)
+      return rep.code(404).send(fail("run not found", 404));
     const runDir = path.join(dataDir, "projects", id, "runs", runId);
     let summary: unknown = null;
     try {
-      summary = JSON.parse(fs.readFileSync(path.join(runDir, "summary.json"), "utf8"));
+      summary = JSON.parse(
+        fs.readFileSync(path.join(runDir, "summary.json"), "utf8"),
+      );
     } catch {
       summary = null;
     }
@@ -241,14 +331,18 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
     const rel = (req.params as { "*": string })["*"];
     if (rel.includes("..")) return rep.code(400).send(fail("bad path", 400));
     const filePath = path.join(dataDir, "projects", id, "runs", runId, rel);
-    if (!filePath.startsWith(path.join(dataDir, "projects", id, "runs", runId))) {
+    if (
+      !filePath.startsWith(path.join(dataDir, "projects", id, "runs", runId))
+    ) {
       return rep.code(400).send(fail("bad path", 400));
     }
     if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
       return rep.code(404).send(fail("file not found", 404));
     }
     const ext = path.extname(filePath).toLowerCase();
-    return rep.type(MIME[ext] ?? "application/octet-stream").send(fs.createReadStream(filePath));
+    return rep
+      .type(MIME[ext] ?? "application/octet-stream")
+      .send(fs.createReadStream(filePath));
   });
 
   return app;

@@ -165,8 +165,10 @@ function passRate(rs) {
 async function viewHome() {
   var projects = CACHE.projects = await api('/api/projects');
   var allRuns = await api('/api/runs?limit=6').catch(function () { return []; });
+  var ai = CACHE.ai = await api('/api/ai').catch(function () { return null; });
   var h = '<header class="top"><div class="brand">Test<span>Forge</span></div><span class="mut">Data Forge · 场景驱动的 AI 测试平台</span></header><div class="home">';
-  h += '<div class="row"><h2>项目</h2><button class="pri" onclick="go({creating:true})">新建项目</button></div>';
+  h += '<div class="row"><h2>项目</h2><div style="display:flex;gap:8px"><button onclick="go({aiForm:!S.aiForm})">AI 配置' + (ai && ai.configured ? ' ✓' : '') + '</button><button class="pri" onclick="go({creating:true})">新建项目</button></div></div>';
+  if (S.aiForm && ai) h += aiFormHtml(ai);
   if (S.creating) h += newProjectForm();
   h += '<div class="pgrid">';
   for (var p of projects) {
@@ -183,6 +185,37 @@ async function viewHome() {
     h += '<tr class="click" onclick="openRun(\'' + r.projectId + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.projectId) + '</td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc((r.startedAt || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
   }
   return h + '</table></div></div>';
+}
+function aiFormHtml(ai) {
+  return '<div class="card form" style="max-width:640px"><b>AI 配置（全局，Midscene / GLM）</b>'
+    + '<div class="mut">ai_action 和视觉断言共用这份配置；项目变量里的 MIDSCENE_* 可以按项目覆盖。</div>'
+    + '<div class="fgrid">'
+    + '<label>模型族<input id="ai-family" value="' + esc(ai.family || 'glm-v') + '"></label>'
+    + '<label>模型名<input id="ai-model" placeholder="如 glm-4.6v" value="' + esc(ai.model) + '"></label>'
+    + '<label>Base URL<input id="ai-baseurl" placeholder="https://open.bigmodel.cn/api/paas/v4" value="' + esc(ai.baseUrl) + '"></label>'
+    + '<label>API Key（' + (ai.hasApiKey ? '已配置，留空保持不变' : '未配置') + '）<input id="ai-key" type="password" placeholder="sk-…"></label>'
+    + '</div>'
+    + '<div id="ai-result" class="mut"></div>'
+    + '<div class="row" style="justify-content:flex-start;margin:0"><button class="pri" onclick="saveAi(false)">保存</button>'
+    + '<button onclick="saveAi(true)">保存并测试连接</button>'
+    + '<button onclick="go({aiForm:false})">收起</button></div></div>';
+}
+async function saveAi(test) {
+  var v = function (i) { return document.getElementById(i).value.trim(); };
+  var body = { family: v('ai-family'), model: v('ai-model'), baseUrl: v('ai-baseurl') };
+  var key = document.getElementById('ai-key').value;
+  if (key !== '') body.apiKey = key;
+  try {
+    CACHE.ai = await api('/api/ai', j('PUT', body));
+    if (!test) { go({ aiForm: false }); return; }
+    document.getElementById('ai-result').textContent = '测试中…（最多等 20 秒）';
+    var r = await api('/api/ai/test', { method: 'POST' });
+    document.getElementById('ai-result').innerHTML = r.ok
+      ? '<span style="color:var(--ok)">✓ 连接正常 · ' + r.ms + 'ms · 模型回复「' + esc(r.reply) + '」</span>'
+      : '<span class="err">✗ ' + esc(r.reply) + '</span>';
+  } catch (e) {
+    document.getElementById('ai-result').innerHTML = '<span class="err">' + esc(e.message) + '</span>';
+  }
 }
 function newProjectForm() {
   return '<div class="card form"><b>新建项目</b><div class="fgrid">'
