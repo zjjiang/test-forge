@@ -1,0 +1,344 @@
+# 场景四：观测看板 /observe、/diagnosis（迁移自 htinns-test e2e/test_04_observe.py）
+# 全页 GET 只读。主线：admin 缺省重定向、整店概要、酒店下钻、orders/price 两模式
+# 旁路：非 admin 锁本店（shop_id 参数无效）；OS02 为已知缺陷证据（onFail warn）
+name: 观测看板
+description: 对应用例 O01-O05、OS01-OS02；OS02 为已知缺陷的证据（onFail warn）
+version: 1
+requires:
+  env: []
+variables:
+  shopName: "E2E-观测迁移店-${var:RUN_STAMP}"
+  shopUser: "e2e_mig4_${var:RUN_DATE}${var:RUN_TIME}"
+actors:
+  admin:
+    description: 管理员
+    dialogs: accept
+  e2e:
+    description: E2E 测试店铺身份（旁路用例）
+    dialogs: accept
+guards:
+  blockedRoutes:
+    - "*/maintain/push/run"
+steps:
+  # ---------- admin 登录 ----------
+  - id: a-login-open
+    as: admin
+    type: navigate
+    url: /login
+  - id: a-login-user
+    as: admin
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:ADMIN_USER}
+  - id: a-login-pw
+    as: admin
+    type: fill
+    selector: 'input[name="password"]'
+    value: ${var:ADMIN_PW}
+  - id: a-login-submit
+    as: admin
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: a-login-topbar
+    as: admin
+    type: wait
+    selector: '.topbar .usermenu'
+    expect: admin 登录成功
+  # ---------- O01 缺省重定向 ----------
+  - id: o01-open
+    as: admin
+    type: navigate
+    url: /observe
+    expect: 裸访问 /observe（应 302 到 /diagnosis）
+  - id: o01-content
+    as: admin
+    type: wait
+    selector: '.content'
+  - id: o01-url
+    as: admin
+    type: js_assert
+    script: 'location.pathname'
+    contains: /diagnosis
+    expect: 重定向到单店诊断
+  - id: o01-shop-sel
+    as: admin
+    type: dom_assert
+    selector: 'select[name="shop_id"]'
+    state: visible
+    expect: 诊断条件表单：店铺下拉
+  - id: o01-hotel
+    as: admin
+    type: dom_assert
+    selector: 'input[name="hotel_name"]'
+    state: visible
+    expect: 诊断条件表单：酒店输入
+  - id: o01-date
+    as: admin
+    type: dom_assert
+    selector: 'input[name="date_from"]'
+    state: visible
+    expect: 诊断条件表单：日期
+  - id: o01-text
+    as: admin
+    type: js_assert
+    script: '(document.querySelector("main.content") || { textContent: "" }).textContent.includes("诊断条件")'
+    truthy: true
+    expect: 页面含诊断条件
+  # ---------- O02 整店诊断概要 ----------
+  - id: o02-open
+    as: admin
+    type: navigate
+    url: /diagnosis?shop_id=7
+    expect: 指定真实店（只读）
+  - id: o02-content
+    as: admin
+    type: wait
+    selector: '.content'
+  - id: o02-hints
+    as: admin
+    type: js_assert
+    script: 'document.querySelectorAll("#hotel-hint option").length <= 50'
+    truthy: true
+    expect: 酒店提示 ≤ 50 条（设计：只给前 50）
+  - id: o02-links
+    as: admin
+    type: js_assert
+    script: 'Array.from(document.querySelectorAll(".tbl a[href*=\"hotel_name=\"]")).every((a) => a.textContent.trim() !== "")'
+    truthy: true
+    expect: 概要行酒店名链接非空
+  - id: o02-shot
+    as: admin
+    type: screenshot
+    name: o02-整店概要
+  # ---------- O03 单酒店下钻 ----------
+  - id: o03-extract
+    as: admin
+    type: extract
+    selector: '.tbl a[href*="hotel_name="]'
+    into: hotel_name
+    when: 'document.querySelector(".tbl a[href*=\"hotel_name=\"]") !== null'
+    expect: 取概要行酒店名
+  - id: o03-click
+    as: admin
+    type: click
+    selector: '.tbl a[href*="hotel_name="]'
+    when: 'document.querySelector(".tbl a[href*=\"hotel_name=\"]") !== null'
+    expect: 点酒店名下钻
+  - id: o03-loaded
+    as: admin
+    type: wait
+    selector: '.content'
+  - id: o03-echo
+    as: admin
+    type: js_assert
+    script: '(() => { const input = document.querySelector("input[name=hotel_name]"); if (input === null) return false; if (!document.querySelector(".tbl a[href*=\"hotel_name=\"]") && input.value === "") return true; const drill = location.href.includes("hotel_name="); return drill ? input.value.trim() !== "" : true; })()'
+    truthy: true
+    expect: 下钻后酒店名回显
+  - id: o03-shot
+    as: admin
+    type: screenshot
+    name: o03-单酒店证据
+  - id: o03-tables
+    as: admin
+    type: js_assert
+    script: '(() => { const input = document.querySelector("input[name=hotel_name]"); const tables = document.querySelectorAll(".tbl").length; if (input === null || input.value.trim() === "") return true; return tables >= 1; })()'
+    truthy: true
+    expect: 下钻到证据视图时含表格组（概要为空时跳过）
+  # ---------- O04 订单观测 ----------
+  - id: o04-open
+    as: admin
+    type: navigate
+    url: /observe?mode=orders
+  - id: o04-tabs
+    as: admin
+    type: wait
+    selector: '.tabs.sub'
+  - id: o04-tab-on
+    as: admin
+    type: dom_assert
+    selector: '.tabs.sub a.tab.on'
+    contains: 订单观测
+    expect: 订单观测 tab 激活
+  - id: o04-sync
+    as: admin
+    type: js_assert
+    script: '(document.querySelector("main.content") || { textContent: "" }).textContent.includes("同步状态")'
+    truthy: true
+    expect: 概况条含同步状态
+  - id: o04-tables
+    as: admin
+    type: dom_assert
+    selector: '.tbl'
+    countAtLeast: 1
+    expect: 三表（或空态）渲染
+  # ---------- O05 价格观测 ----------
+  - id: o05-open
+    as: admin
+    type: navigate
+    url: /observe?mode=price
+  - id: o05-tabs
+    as: admin
+    type: wait
+    selector: '.tabs.sub'
+  - id: o05-tab-on
+    as: admin
+    type: dom_assert
+    selector: '.tabs.sub a.tab.on'
+    contains: 价格观测
+    expect: 价格观测 tab 激活
+  - id: o05-deviation
+    as: admin
+    type: js_assert
+    script: '(document.querySelector("main.content") || { textContent: "" }).textContent.includes("信科抽检偏差")'
+    truthy: true
+    expect: 偏差概况条在
+  - id: o05-body
+    as: admin
+    type: js_assert
+    script: '(() => { const t = (document.querySelector("main.content") || { textContent: "" }).textContent; return t.includes("今日无偏差。") || document.querySelectorAll(".tbl").length >= 1; })()'
+    truthy: true
+    expect: 偏差表或「今日无偏差。」
+  # ---------- admin 创建 E2E 店（旁路用例身份） ----------
+  - id: mk-open
+    as: admin
+    type: navigate
+    url: /settings/shop
+  - id: mk-table
+    as: admin
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: mk-click-add
+    as: admin
+    type: click
+    selector: '#btn-add-shop'
+  - id: mk-dlg
+    as: admin
+    type: wait
+    selector: '#adddlg[open]'
+  - id: mk-name
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="name"]'
+    value: ${var:shopName}
+  - id: mk-username
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="username"]'
+    value: ${var:shopUser}
+  - id: mk-submit
+    as: admin
+    type: click
+    selector: '#adddlg button.btn'
+  - id: mk-flash
+    as: admin
+    type: wait
+    selector: '.content .flash'
+  - id: mk-flash-text
+    as: admin
+    type: dom_assert
+    selector: '.content .flash'
+    contains: 已创建
+    expect: E2E 店创建成功
+  # ---------- e2e 登录 ----------
+  - id: e-login-open
+    as: e2e
+    type: navigate
+    url: /login
+  - id: e-login-user
+    as: e2e
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:shopUser}
+  - id: e-login-pw
+    as: e2e
+    type: fill
+    selector: 'input[name="password"]'
+    value: "123456"
+  - id: e-login-submit
+    as: e2e
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: e-login-topbar
+    as: e2e
+    type: wait
+    selector: '.topbar .usermenu'
+    expect: E2E 店身份登录成功
+  # ---------- OS01 非 admin 诊断锁本店 ----------
+  - id: os01-open
+    as: e2e
+    type: navigate
+    url: /diagnosis?shop_id=7
+  - id: os01-content
+    as: e2e
+    type: wait
+    selector: '.content'
+  - id: os01-hints
+    as: e2e
+    type: js_assert
+    script: 'Array.from(document.querySelectorAll("#hotel-hint option")).every((o) => (o.getAttribute("value") || "").startsWith("E2E"))'
+    truthy: true
+    expect: 酒店提示只可能是本店（E2E 前缀）
+  - id: os01-links
+    as: e2e
+    type: js_assert
+    script: 'Array.from(document.querySelectorAll(".tbl a[href*=\"hotel_name=\"]")).every((a) => a.textContent.includes("E2E"))'
+    truthy: true
+    expect: 概要行也只含本店酒店
+  - id: os01-shot
+    as: e2e
+    type: screenshot
+    name: os01-仍为本店
+  # ---------- OS02 非 admin 订单观测（已知缺陷证据） ----------
+  - id: os02-open
+    as: e2e
+    type: navigate
+    url: /observe?mode=orders&shop_id=7
+  - id: os02-tabs
+    as: e2e
+    type: wait
+    selector: '.tabs.sub'
+  - id: os02-check
+    as: e2e
+    type: js_assert
+    script: '(() => { const first = document.querySelector(".tbl"); if (first === null) return true; const rows = first.querySelectorAll("tbody tr"); if (rows.length === 0) return true; return rows.length <= 1 && rows[0].textContent.includes("E2E-"); })()'
+    truthy: true
+    onFail: warn
+    expect: 同步状态表只出现本店——已知缺陷：sync_rows 未按 shop_id 过滤，当前预期失败
+teardown:
+  - id: td-login-open
+    as: admin
+    type: navigate
+    url: /login
+  - id: td-login-user
+    as: admin
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:ADMIN_USER}
+  - id: td-login-pw
+    as: admin
+    type: fill
+    selector: 'input[name="password"]'
+    value: ${var:ADMIN_PW}
+  - id: td-login-submit
+    as: admin
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: td-topbar
+    as: admin
+    type: wait
+    selector: '.topbar .usermenu'
+  - id: td-open
+    as: admin
+    type: navigate
+    url: /settings/shop
+  - id: td-table
+    as: admin
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: td-toggle
+    as: admin
+    type: click
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+    when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
+    onFail: warn
+    expect: 停用 E2E 店留档（仅当仍在营）

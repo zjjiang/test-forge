@@ -105,10 +105,18 @@ export async function runScenario(
     RUN_STAMP: `${mmdd}-${hms}`,
     RUN_STAMP_COMPACT: mmdd + hms,
   };
+  // 场景变量可以引用内置变量/项目变量（如 shopName: "E2E-x-${var:RUN_STAMP}"），
+  // 反复解析直到不再变化（最多 5 轮，防环）
+  let declared: Record<string, unknown> = { ...(opts.scenario.variables ?? {}) };
+  for (let round = 0; round < 5; round += 1) {
+    const next = interpolateDeep(declared, { ...builtins, ...snap.values, ...declared, ...(opts.varsOverride ?? {}) });
+    if (JSON.stringify(next) === JSON.stringify(declared)) break;
+    declared = next as Record<string, unknown>;
+  }
   const vars: Record<string, unknown> = {
     ...builtins,
     ...snap.values,
-    ...(opts.scenario.variables ?? {}),
+    ...declared,
     ...(opts.varsOverride ?? {}),
   };
   for (const [k, v] of Object.entries(snap.values)) {
@@ -183,7 +191,19 @@ export async function runScenario(
         return;
       }
       const stepShots: string[] = [];
-      const inst = interpolateDeep(step, stepVars()) as Step;
+      let inst: Step;
+      try {
+        inst = interpolateDeep(step, stepVars()) as Step;
+      } catch (e) {
+        // 变量缺失等插值失败按普通失败步骤处理，不中断整个 run
+        stepResults.push(
+          emptyStep(i, step, actorName, step.onFail === "warn" ? "warned" : "failed",
+            e instanceof Error ? e.message : String(e)),
+        );
+        if (step.onFail === "warn")
+          warnings.push({ where: `step ${i + 1} (${step.id ?? step.type})`, message: e instanceof Error ? e.message : String(e) });
+        return;
+      }
       const result = await executeStep(inst, {
         runtime,
         baseUrl: baseUrl,

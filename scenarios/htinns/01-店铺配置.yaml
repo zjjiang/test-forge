@@ -1,0 +1,642 @@
+# 场景一：店铺配置页 /settings/shop（迁移自 htinns-test e2e/test_01_shop.py）
+# 主线：admin 登录→新增 E2E 店→写凭证→启停→信科提醒→搜索→权限边界→退出
+# 硬规则：写操作只落 E2E- 前缀店铺；真实店（新乡旅途）只读登录走查
+name: 店铺配置
+description: 主流程 + 旁路（权限边界 / 校验报错 / 非 admin 视角 / 提醒关闭），对应用例 M01-M11、S01-S10
+version: 1
+requires:
+  env: []
+variables:
+  shopName: "E2E-迁移店-${var:RUN_STAMP}"
+  shopUser: "e2e_mig_${var:RUN_DATE}${var:RUN_TIME}"
+actors:
+  admin:
+    description: 管理员（全程自动接受原生 confirm）
+    dialogs: accept
+  shop:
+    description: 新乡旅途店侧账号（只读真实店）
+    dialogs: accept
+guards:
+  blockedRoutes:
+    - "*/maintain/push/run"
+steps:
+  # ---------- M01 登录平台 ----------
+  - id: m01-open
+    as: admin
+    type: navigate
+    url: /login
+    expect: 打开登录页
+  - id: m01-user
+    as: admin
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:ADMIN_USER}
+  - id: m01-pw
+    as: admin
+    type: fill
+    selector: 'input[name="password"]'
+    value: ${var:ADMIN_PW}
+  - id: m01-submit
+    as: admin
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: m01-topbar
+    as: admin
+    type: wait
+    selector: '.topbar .usermenu'
+    expect: 登录成功进平台
+  # ---------- M02 查看全部店铺 ----------
+  - id: m02-open
+    as: admin
+    type: navigate
+    url: /settings/shop
+    expect: 打开店铺配置页
+  - id: m02-table
+    as: admin
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: m02-addbtn
+    as: admin
+    type: dom_assert
+    selector: '#btn-add-shop'
+    state: visible
+    expect: admin 可见「增加店铺」入口
+  - id: m02-rows
+    as: admin
+    type: dom_assert
+    selector: '.tblwrap table.tbl tbody tr'
+    countAtLeast: 2
+    expect: 列表展示全部店铺（含停用）至少 2 行
+  # ---------- M03 新增店铺 ----------
+  - id: m03-click-add
+    as: admin
+    type: click
+    selector: '#btn-add-shop'
+    expect: 打开新增店铺弹窗
+  - id: m03-dlg
+    as: admin
+    type: wait
+    selector: '#adddlg[open]'
+  - id: m03-name
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="name"]'
+    value: ${var:shopName}
+  - id: m03-username
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="username"]'
+    value: ${var:shopUser}
+  - id: m03-shot
+    as: admin
+    type: screenshot
+    name: m03-填写新增弹窗
+  - id: m03-submit
+    as: admin
+    type: click
+    selector: '#adddlg button.btn'
+  - id: m03-flash
+    as: admin
+    type: wait
+    selector: '.content .flash'
+  - id: m03-flash-text
+    as: admin
+    type: dom_assert
+    selector: '.content .flash'
+    contains: 已创建
+    expect: flash 提示已创建
+  - id: m03-row
+    as: admin
+    type: dom_assert
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}"))'
+    count: 1
+    expect: 新店行恰 1 条
+  - id: m03-pill
+    as: admin
+    type: dom_assert
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .pill'
+    text: 在营
+    expect: 新店状态在营
+  # ---------- M04 为新店填写凭证 ----------
+  - id: m04-edit
+    as: admin
+    type: click
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-edit'
+    expect: 打开 E2E 店编辑弹窗
+  - id: m04-dlg
+    as: admin
+    type: wait
+    selector: '#editdlg[open]'
+  - id: m04-xkid
+    as: admin
+    type: fill
+    selector: '#editdlg input[name="xk_shop_id"]'
+    value: E2E9999
+  - id: m04-cookie
+    as: admin
+    type: fill
+    selector: '#editdlg input[name="xk_cookie"]'
+    value: E2E-invalid-cookie-for-alert-test
+  - id: m04-shot
+    as: admin
+    type: screenshot
+    name: m04-只填两字段
+  - id: m04-submit
+    as: admin
+    type: click
+    selector: '#editdlg button.btn'
+  - id: m04-flash
+    as: admin
+    type: wait
+    selector: '.content .flash'
+  - id: m04-flash-text
+    as: admin
+    type: dom_assert
+    selector: '.content .flash'
+    contains: 已保存 2 个字段
+    expect: 部分更新只保存填了的 2 个字段
+  # ---------- M05 保存后凭证回显 ----------
+  - id: m05-xkid
+    as: admin
+    type: dom_assert
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) td.num'
+    contains: E2E9999
+    expect: 平台 ID 明文回显
+  - id: m05-cookie-mask
+    as: admin
+    type: js_assert
+    script: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); if (!row) return false; return ((row.querySelectorAll("td.num")[1] || { textContent: "" }).textContent || "").trim().startsWith("****"); })()'
+    truthy: true
+    expect: Cookie 列掩码回显
+  # ---------- M06 编辑弹窗不回显旧值 ----------
+  - id: m06-edit
+    as: admin
+    type: click
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-edit'
+    expect: 再开编辑弹窗
+  - id: m06-dlg
+    as: admin
+    type: wait
+    selector: '#editdlg[open]'
+  - id: m06-empty
+    as: admin
+    type: js_assert
+    script: '(() => { const els = document.querySelectorAll(''#editdlg input[type=text]:not([name=shop_id])''); return els.length === 5 && Array.from(els).every((i) => i.value === ""); })()'
+    truthy: true
+    expect: 5 个凭证输入框全部为空（留空=不修改）
+  - id: m06-close
+    as: admin
+    type: click
+    selector: '#dlg-close'
+  # ---------- M07 停用店铺 ----------
+  - id: m07-shot
+    as: admin
+    type: screenshot
+    name: m07-停用前列表
+  - id: m07-toggle
+    as: admin
+    type: click
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+    expect: 行内停用（原生 confirm 自动接受）
+  - id: m07-flash
+    as: admin
+    type: wait
+    selector: '.content .flash'
+  - id: m07-flash-text
+    as: admin
+    type: dom_assert
+    selector: '.content .flash'
+    contains: 已停用
+    expect: flash 提示已停用
+  - id: m07-pill
+    as: admin
+    type: dom_assert
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .pill'
+    text: 停用
+    expect: 行状态翻转为停用
+  # ---------- M08 启用店铺 ----------
+  - id: m08-toggle
+    as: admin
+    type: click
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+    expect: 再启用
+  - id: m08-flash
+    as: admin
+    type: wait
+    selector: '.content .flash'
+  - id: m08-flash-text
+    as: admin
+    type: dom_assert
+    selector: '.content .flash'
+    contains: 已启用
+    expect: flash 提示已启用
+  - id: m08-pill
+    as: admin
+    type: dom_assert
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .pill'
+    text: 在营
+    expect: 行状态回到在营
+  # ---------- M09 信科凭证失效提醒 ----------
+  - id: m09-badge
+    as: admin
+    type: wait
+    selector: '#ckalert:not([hidden])'
+    timeoutMs: 20000
+    expect: 顶栏警示徽标亮起
+  - id: m09-count
+    as: admin
+    type: js_assert
+    script: 'Number(document.querySelector(''#ckalert-n'').textContent) >= 1'
+    truthy: true
+    expect: 失效店数 >= 1
+  - id: m09-chip
+    as: admin
+    type: click
+    selector: '#ckalert-chip'
+  - id: m09-pop
+    as: admin
+    type: wait
+    selector: '#ckalert-pop:not([hidden])'
+  - id: m09-pop-shop
+    as: admin
+    type: dom_assert
+    selector: '#ckalert-pop'
+    contains: ${var:shopName}
+    expect: 浮层列出失效店铺
+  - id: m09-pop-entry
+    as: admin
+    type: dom_assert
+    selector: '#ckalert-pop'
+    contains: 去店铺配置更新
+    expect: 浮层有去配置更新入口
+  - id: m09-recheck
+    as: admin
+    type: click
+    selector: '#ckalert-recheck'
+    expect: 可重新检测
+  - id: m09-wait
+    as: admin
+    type: wait
+    ms: 500
+  # ---------- M11 搜索店铺 ----------
+  - id: m11-open
+    as: admin
+    type: navigate
+    url: /settings/shop
+    expect: 搜索前列表
+  - id: m11-fill
+    as: admin
+    type: fill
+    selector: '.controls form[action="/settings/shop"] input[name="q"]'
+    value: ${var:shopName}
+  - id: m11-go
+    as: admin
+    type: click
+    selector: '.controls form[action="/settings/shop"] button'
+  - id: m11-table
+    as: admin
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: m11-one-row
+    as: admin
+    type: dom_assert
+    selector: '.tbl tbody tr'
+    count: 1
+    expect: 全名精确命中恰 1 行
+  - id: m11-input-kept
+    as: admin
+    type: js_assert
+    script: '(document.querySelector(''.controls form[action="/settings/shop"] input[name="q"]'') || {value: ""}).value'
+    equals: ${var:shopName}
+    expect: 搜索框保留完整关键词
+  # ---------- S06 新增必填校验 ----------
+  - id: s06-open
+    as: admin
+    type: navigate
+    url: /settings/shop
+  - id: s06-click-add
+    as: admin
+    type: click
+    selector: '#btn-add-shop'
+  - id: s06-dlg
+    as: admin
+    type: wait
+    selector: '#adddlg[open]'
+  - id: s06-submit
+    as: admin
+    type: click
+    selector: '#adddlg button.btn'
+    expect: 留空提交
+  - id: s06-invalid
+    as: admin
+    type: js_assert
+    script: '!document.querySelector(''#adddlg input[name="name"]'').validity.valid'
+    truthy: true
+    expect: HTML5 必填拦截
+  - id: s06-still-open
+    as: admin
+    type: js_assert
+    script: 'document.querySelector(''#adddlg'').open'
+    truthy: true
+    expect: 弹窗不关、不跳转
+  # ---------- S07 重复用户名报错 ----------
+  - id: s07-close-prev
+    as: admin
+    type: click
+    selector: '#adddlg #add-close'
+    expect: 关掉 S06 残留的新增弹窗
+  - id: s07-open
+    as: admin
+    type: click
+    selector: '#btn-add-shop'
+  - id: s07-dlg
+    as: admin
+    type: wait
+    selector: '#adddlg[open]'
+  - id: s07-name
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="name"]'
+    value: ${var:shopName}-重名
+  - id: s07-username
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="username"]'
+    value: ${var:shopUser}
+  - id: s07-submit
+    as: admin
+    type: click
+    selector: '#adddlg button.btn'
+    expect: 提交重复用户名
+  - id: s07-flash
+    as: admin
+    type: wait
+    selector: '.content .flash'
+  - id: s07-flash-text
+    as: admin
+    type: dom_assert
+    selector: '.content .flash'
+    contains: 创建失败
+    expect: flash 提示创建失败
+  - id: s07-danger
+    as: admin
+    type: dom_assert
+    selector: '.content .flash.danger'
+    state: visible
+    expect: 错误级别 danger
+  # ---------- S08 管理员账户不可停用 ----------
+  - id: s08-no-toggle
+    as: admin
+    type: dom_assert
+    selector: '.tbl tbody tr:has(td b:text-is("管理员")) .btn-toggle'
+    count: 0
+    expect: id=1 行无停用按钮
+  - id: s08-api
+    as: admin
+    type: http
+    method: POST
+    path: /settings/shop/toggle
+    form:
+      shop_id: "1"
+    expectStatus: 403
+    expect: 直接 POST 停管理员 → 403
+  # ---------- S09 凭证提醒本次不再显示 ----------
+  - id: s09-badge
+    as: admin
+    type: wait
+    selector: '#ckalert:not([hidden])'
+    timeoutMs: 20000
+  - id: s09-chip
+    as: admin
+    type: click
+    selector: '#ckalert-chip'
+  - id: s09-pop
+    as: admin
+    type: wait
+    selector: '#ckalert-pop:not([hidden])'
+  - id: s09-dismiss
+    as: admin
+    type: click
+    selector: '#ckalert-dismiss'
+    expect: 本次不再显示
+  - id: s09-session
+    as: admin
+    type: js_assert
+    script: 'sessionStorage.getItem(''ckalert-dismissed'')'
+    equals: "1"
+    expect: 写入 sessionStorage
+  - id: s09-reload
+    as: admin
+    type: navigate
+    url: /settings/shop
+    expect: 刷新页面
+  - id: s09-table
+    as: admin
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: s09-probed
+    as: admin
+    type: js_assert
+    script: 'document.getElementById(''ckalert-n'') !== null && document.getElementById(''ckalert-n'').textContent !== ''0'''
+    truthy: true
+    timeoutMs: 30000
+    expect: 探测完成（计数非 0）
+  - id: s09-hidden
+    as: admin
+    type: dom_assert
+    selector: '#ckalert'
+    state: hidden
+    expect: 刷新后徽标保持隐藏
+  # ---------- M10 退出登录 ----------
+  - id: m10-wait
+    as: admin
+    type: wait
+    ms: 1000
+    expect: 等顶栏布局稳定
+  - id: m10-hover
+    as: admin
+    type: hover
+    selector: '.topbar .usermenu'
+    expect: 悬停展开用户菜单
+  - id: m10-logout
+    as: admin
+    type: click
+    selector: '.udrop a[href="/logout"]'
+  - id: m10-login
+    as: admin
+    type: wait
+    selector: '.loginbody'
+  - id: m10-url
+    as: admin
+    type: js_assert
+    script: 'location.pathname'
+    contains: /login
+    expect: 回到登录页
+  # ---------- 店侧：S01-S05、S10 ----------
+  - id: s-login-open
+    as: shop
+    type: navigate
+    url: /login
+  - id: s-login-user
+    as: shop
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:SHOP_USER}
+  - id: s-login-pw
+    as: shop
+    type: fill
+    selector: 'input[name="password"]'
+    value: ${var:SHOP_PW}
+  - id: s-login-submit
+    as: shop
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: s-login-topbar
+    as: shop
+    type: wait
+    selector: '.topbar .usermenu'
+    expect: 店侧登录成功
+  - id: s01-open
+    as: shop
+    type: navigate
+    url: /settings/shop
+  - id: s01-table
+    as: shop
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: s01-one-row
+    as: shop
+    type: dom_assert
+    selector: '.tbl tbody tr'
+    count: 1
+    expect: 非 admin 恰 1 行（本店）
+  - id: s01-no-add
+    as: shop
+    type: dom_assert
+    selector: '#btn-add-shop'
+    count: 0
+    expect: 无「增加店铺」按钮
+  - id: s01-has-edit
+    as: shop
+    type: dom_assert
+    selector: '.tbl tbody tr .btn-edit'
+    count: 1
+    expect: 本店行有编辑入口
+  - id: s02-mask
+    as: shop
+    type: js_assert
+    script: '(() => { const ok = (v) => v === "（未设置）" || /^\*\*\*\*.{0,8}$/.test(v); return Array.from(document.querySelectorAll(''.tbl tbody tr'')).every((tr) => ok((tr.querySelector("td:nth-child(3)")?.textContent || "").trim()) && ok((tr.querySelector("td:nth-child(4)")?.textContent || "").trim())); })()'
+    truthy: true
+    expect: 凭证列全掩码，页面无明文
+  - id: s03-edit
+    as: shop
+    type: click
+    selector: '.tbl tbody tr:has(td b:text-is("${var:SHOP_USER}")) .btn-edit'
+    expect: 打开本店编辑弹窗
+  - id: s03-dlg
+    as: shop
+    type: wait
+    selector: '#editdlg[open]'
+  - id: s03-empty
+    as: shop
+    type: js_assert
+    script: '(() => { const els = document.querySelectorAll(''#editdlg input[type=text]:not([name=shop_id])''); return els.length === 5 && Array.from(els).every((i) => i.value === ""); })()'
+    truthy: true
+    expect: 弹窗预填恒空
+  - id: s04-submit
+    as: shop
+    type: click
+    selector: '#editdlg button.btn'
+    expect: 全空保存
+  - id: s04-flash
+    as: shop
+    type: wait
+    selector: '.content .flash'
+  - id: s04-flash-text
+    as: shop
+    type: dom_assert
+    selector: '.content .flash'
+    contains: 没有填写任何要修改的字段
+    expect: 留空保存提示
+  - id: s04-warning
+    as: shop
+    type: dom_assert
+    selector: '.content .flash.warning'
+    state: visible
+    expect: 提示级别 warning
+  - id: s05-create
+    as: shop
+    type: http
+    method: POST
+    path: /settings/shop/create
+    form:
+      name: x
+      username: x
+    expectStatus: 403
+    expect: 非 admin 创建接口 403
+  - id: s05-toggle
+    as: shop
+    type: http
+    method: POST
+    path: /settings/shop/toggle
+    form:
+      shop_id: "2"
+    expectStatus: 403
+    expect: 非 admin 停用接口 403
+  - id: s05-rows
+    as: shop
+    type: dom_assert
+    selector: '.tbl tbody tr'
+    count: 1
+    expect: 页面行数不变
+  - id: s10-no-search
+    as: shop
+    type: dom_assert
+    selector: 'form[action="/settings/shop"] input[name="q"]'
+    count: 0
+    expect: 非 admin 无搜索框
+  - id: s10-no-pager
+    as: shop
+    type: dom_assert
+    selector: 'nav.pager'
+    count: 0
+    expect: 非 admin 无分页条
+teardown:
+  # 收尾：admin 重新登录，若 E2E 店还在营则停用留档（common 无删除接口）
+  - id: td-login-open
+    as: admin
+    type: navigate
+    url: /login
+  - id: td-login-user
+    as: admin
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:ADMIN_USER}
+  - id: td-login-pw
+    as: admin
+    type: fill
+    selector: 'input[name="password"]'
+    value: ${var:ADMIN_PW}
+  - id: td-login-submit
+    as: admin
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: td-topbar
+    as: admin
+    type: wait
+    selector: '.topbar .usermenu'
+  - id: td-open
+    as: admin
+    type: navigate
+    url: /settings/shop
+  - id: td-table
+    as: admin
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: td-toggle
+    as: admin
+    type: click
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+    when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
+    onFail: warn
+    expect: 停用 E2E 店留档（仅当仍在营）

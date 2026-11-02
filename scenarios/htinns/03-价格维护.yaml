@@ -1,0 +1,466 @@
+# 场景三：价格维护区 /maintain（迁移自 htinns-test e2e/test_03_maintain.py）
+# 六个子页逐页只读走查 + 映射导出；旁路：非 admin 无店铺下拉、shop_id 静默忽略、跨店明细 404
+# 红线：绝不 POST /maintain/push/run、calc/collect、filter、crawl、calc confirm/void/rate、
+#       push/auto-toggle、config/op、config/import（项目护栏也拦截）
+name: 价格维护
+description: 对应用例 P01-P09、PS01-PS03；P07 为已知 bug 的缺陷证据（onFail warn）
+version: 1
+requires:
+  env: []
+variables:
+  shopName: "E2E-维护迁移店-${var:RUN_STAMP}"
+  shopUser: "e2e_mig3_${var:RUN_DATE}${var:RUN_TIME}"
+actors:
+  admin:
+    description: 管理员
+    dialogs: accept
+  e2e:
+    description: E2E 测试店铺身份（旁路用例）
+    dialogs: accept
+guards:
+  blockedRoutes:
+    - "*/maintain/push/run"
+    - "*/maintain/push/auto-toggle"
+    - "*/maintain/calc/*/confirm"
+    - "*/maintain/calc/*/void"
+    - "*/maintain/calc/*/rate"
+    - "*/maintain/calc/batch-confirm"
+    - "*/maintain/config/op"
+    - "*/maintain/config/import"
+steps:
+  # ---------- admin 登录 ----------
+  - id: a-login-open
+    as: admin
+    type: navigate
+    url: /login
+  - id: a-login-user
+    as: admin
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:ADMIN_USER}
+  - id: a-login-pw
+    as: admin
+    type: fill
+    selector: 'input[name="password"]'
+    value: ${var:ADMIN_PW}
+  - id: a-login-submit
+    as: admin
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: a-login-topbar
+    as: admin
+    type: wait
+    selector: '.topbar .usermenu'
+    expect: admin 登录成功
+  # ---------- P01 首页占位 ----------
+  - id: p01-open
+    as: admin
+    type: navigate
+    url: /maintain
+    expect: 打开价格维护首页
+  - id: p01-tabs
+    as: admin
+    type: wait
+    selector: '.tabs.sub a.tab'
+  - id: p01-labels
+    as: admin
+    type: js_assert
+    script: 'Array.from(document.querySelectorAll(".tabs.sub a.tab")).map((t) => t.textContent.trim()).join("|")'
+    equals: 工作流|① 筛选|② 抓价|③ 算价|④ 推送|配置
+    expect: 六个子 tab 顺序与文案
+  - id: p01-placeholder
+    as: admin
+    type: js_assert
+    script: '(document.querySelector("main.content") || { textContent: "" }).textContent.includes("尚未上线")'
+    truthy: true
+    expect: 首页是说明卡，不默认跳子页
+  # ---------- P02 工作流总览 ----------
+  - id: p02-open
+    as: admin
+    type: navigate
+    url: /maintain/wf
+  - id: p02-loaded
+    as: admin
+    type: wait
+    selector: '.tbl, main.content'
+  - id: p02-body
+    as: admin
+    type: js_assert
+    script: '(() => { const t = (document.querySelector("main.content") || { textContent: "" }).textContent; return t.includes("① 筛选") && t.includes("④ 推送"); })()'
+    truthy: true
+    expect: 工序四段齐全
+  - id: p02-rows
+    as: admin
+    type: js_assert
+    script: '(() => { const rows = document.querySelectorAll(".tbl tbody tr"); if (rows.length === 0) return true; const first = rows[0].textContent; return first.includes("本店暂无在营酒店") ? rows.length === 1 : rows.length >= 1; })()'
+    truthy: true
+    expect: 工序表有行或明确空态
+  # ---------- P09 工作流大店性能（2 万+ 酒店 90s 内可交互） ----------
+  - id: p09-open
+    as: admin
+    type: navigate
+    url: /maintain/wf?shop_id=7
+    waitUntil: domcontentloaded
+    timeoutMs: 90000
+    expect: 打开大店工作流（90s 内）
+  - id: p09-table
+    as: admin
+    type: wait
+    selector: '.tbl'
+    timeoutMs: 90000
+    expect: 大页可交互
+  - id: p09-shot
+    as: admin
+    type: screenshot
+    name: p09-大店工作流
+  # ---------- P03 筛选执行页 ----------
+  - id: p03-open
+    as: admin
+    type: navigate
+    url: /maintain/filter
+  - id: p03-btn
+    as: admin
+    type: wait
+    selector: '#btn-launch'
+  - id: p03-body
+    as: admin
+    type: js_assert
+    script: '(() => { const t = (document.querySelector("main.content") || { textContent: "" }).textContent; return t.includes("还没有任务记录") || document.querySelectorAll(".tbl tbody tr").length >= 1; })()'
+    truthy: true
+    expect: 任务表或空态
+  - id: p03-launch
+    as: admin
+    type: click
+    selector: '#btn-launch'
+    expect: 打开发起弹层（不提交）
+  - id: p03-dlg
+    as: admin
+    type: wait
+    selector: '#launchdlg[open]'
+  - id: p03-shop-sel
+    as: admin
+    type: dom_assert
+    selector: '#launchdlg select[name="shop_id"]'
+    count: 1
+    expect: admin 弹层有店铺下拉
+  - id: p03-esc
+    as: admin
+    type: press
+    key: Escape
+  - id: p03-settle
+    as: admin
+    type: wait
+    ms: 300
+  # ---------- P04 抓价执行页 ----------
+  - id: p04-open
+    as: admin
+    type: navigate
+    url: /maintain/crawl
+  - id: p04-btn
+    as: admin
+    type: wait
+    selector: '#btn-launch'
+  - id: p04-visible
+    as: admin
+    type: dom_assert
+    selector: '#btn-launch'
+    state: visible
+    expect: 抓价入口可见（不发起）
+  - id: p04-body
+    as: admin
+    type: js_assert
+    script: '(() => { const t = (document.querySelector("main.content") || { textContent: "" }).textContent; return t.includes("还没有任务记录") || document.querySelectorAll(".tbl tbody tr").length >= 1; })()'
+    truthy: true
+    expect: 任务表或空态
+  # ---------- P05 算价队列 ----------
+  - id: p05-open
+    as: admin
+    type: navigate
+    url: /maintain/calc
+  - id: p05-content
+    as: admin
+    type: wait
+    selector: '.content'
+  - id: p05-q
+    as: admin
+    type: dom_assert
+    selector: '.controls input[name="q"]'
+    count: 1
+    expect: 搜索控件在
+  - id: p05-status-opts
+    as: admin
+    type: js_assert
+    script: '(() => { const opts = Array.from(document.querySelectorAll("select[name=status] option")).map((o) => o.textContent.trim()); return opts.includes("全部状态") && opts.includes("待确认"); })()'
+    truthy: true
+    expect: 状态下拉含全部状态/待确认
+  - id: p05-void
+    as: admin
+    type: dom_assert
+    selector: 'input[name="include_void"]'
+    count: 1
+    expect: 含已作复选框在
+  - id: p05-body
+    as: admin
+    type: js_assert
+    script: '(() => { const t = (document.querySelector("main.content") || { textContent: "" }).textContent; return t.includes("队列还是空的") || document.querySelectorAll(".tbl tbody tr").length >= 1; })()'
+    truthy: true
+    expect: 队列表或空态
+  - id: p05-detail
+    as: admin
+    type: click
+    selector: '.btn-detail'
+    when: 'document.querySelector(".btn-detail") !== null'
+    expect: 有队列则打开明细弹层（只读）
+  - id: p05-dlg
+    as: admin
+    type: wait
+    selector: '#detaildlg[open]'
+    when: 'document.querySelector(".btn-detail") !== null'
+  - id: p05-esc
+    as: admin
+    type: press
+    key: Escape
+  - id: p05-settle
+    as: admin
+    type: wait
+    ms: 300
+  # ---------- P06 推送页（高危，只看不点） ----------
+  - id: p06-open
+    as: admin
+    type: navigate
+    url: /maintain/push
+  - id: p06-toggle
+    as: admin
+    type: wait
+    selector: '#autoToggle'
+  - id: p06-toggle-vis
+    as: admin
+    type: dom_assert
+    selector: '#autoToggle'
+    state: visible
+    expect: 自动推送开关在
+  - id: p06-push-vis
+    as: admin
+    type: dom_assert
+    selector: '#btn-push-now'
+    state: visible
+    expect: 立即推送按钮在（不点击）
+  - id: p06-body
+    as: admin
+    type: js_assert
+    script: '(() => { const t = (document.querySelector("main.content") || { textContent: "" }).textContent; return t.includes("暂无推送记录") || document.querySelectorAll(".tbl tbody tr").length >= 1; })()'
+    truthy: true
+    expect: 推送记录表或空态
+  # ---------- P07 配置页与映射导出（已知 bug，缺陷证据） ----------
+  - id: p07-open
+    as: admin
+    type: navigate
+    url: /maintain/config?shop_id=7
+  - id: p07-content
+    as: admin
+    type: wait
+    selector: '.content'
+  - id: p07-body
+    as: admin
+    type: js_assert
+    script: '(() => { const t = (document.querySelector("main.content") || { textContent: "" }).textContent; return t.includes("暂无映射") || document.querySelectorAll(".tbl tbody tr").length >= 1; })()'
+    truthy: true
+    expect: 映射表或空态
+  - id: p07-importdlg
+    as: admin
+    type: dom_assert
+    selector: '#importdlg'
+    count: 1
+    expect: 导入弹窗在（只看不提交）
+  - id: p07-export
+    as: admin
+    type: download
+    click: 'a.chip[href*="config/export"]'
+    namePrefix: xk_rate_config_shop7
+    nameSuffix: .xlsx
+    onFail: warn
+    expect: 导出文件名带 shop7——已知 bug：config_page 未传 is_admin 致导出落错店，当前预期失败
+  # ---------- P08 算价筛选组合 ----------
+  - id: p08-open
+    as: admin
+    type: navigate
+    url: /maintain/calc?status=2&include_void=1
+  - id: p08-content
+    as: admin
+    type: wait
+    selector: '.content'
+  - id: p08-checked
+    as: admin
+    type: dom_assert
+    selector: 'input[name="include_void"]'
+    state: checked
+    expect: 含已作复选框勾选
+  - id: p08-rows
+    as: admin
+    type: js_assert
+    script: '(() => { const rows = document.querySelectorAll(".tbl tbody tr"); if (rows.length === 0) return (document.querySelector("main.content") || { textContent: "" }).textContent.includes("队列还是空的"); return Array.from(rows).every((r) => r.textContent.includes("待确认") || r.textContent.includes("已作废")); })()'
+    truthy: true
+    expect: 命中行全为待确认/已作废（或空态）
+  # ---------- admin 创建 E2E 店（旁路用例身份） ----------
+  - id: mk-open
+    as: admin
+    type: navigate
+    url: /settings/shop
+  - id: mk-table
+    as: admin
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: mk-click-add
+    as: admin
+    type: click
+    selector: '#btn-add-shop'
+  - id: mk-dlg
+    as: admin
+    type: wait
+    selector: '#adddlg[open]'
+  - id: mk-name
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="name"]'
+    value: ${var:shopName}
+  - id: mk-username
+    as: admin
+    type: fill
+    selector: '#adddlg input[name="username"]'
+    value: ${var:shopUser}
+  - id: mk-submit
+    as: admin
+    type: click
+    selector: '#adddlg button.btn'
+  - id: mk-flash
+    as: admin
+    type: wait
+    selector: '.content .flash'
+  - id: mk-flash-text
+    as: admin
+    type: dom_assert
+    selector: '.content .flash'
+    contains: 已创建
+    expect: E2E 店创建成功
+  # ---------- e2e 登录 ----------
+  - id: e-login-open
+    as: e2e
+    type: navigate
+    url: /login
+  - id: e-login-user
+    as: e2e
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:shopUser}
+  - id: e-login-pw
+    as: e2e
+    type: fill
+    selector: 'input[name="password"]'
+    value: "123456"
+  - id: e-login-submit
+    as: e2e
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: e-login-topbar
+    as: e2e
+    type: wait
+    selector: '.topbar .usermenu'
+    expect: E2E 店身份登录成功
+  # ---------- PS01 非 admin 无店铺下拉 ----------
+  - id: ps01-calc
+    as: e2e
+    type: navigate
+    url: /maintain/calc
+  - id: ps01-calc-chk
+    as: e2e
+    type: js_assert
+    script: 'document.querySelector("select[name=shop_id]") === null'
+    truthy: true
+    expect: calc 页无店铺下拉
+  - id: ps01-push
+    as: e2e
+    type: navigate
+    url: /maintain/push
+  - id: ps01-push-chk
+    as: e2e
+    type: js_assert
+    script: 'document.querySelector("select[name=shop_id]") === null'
+    truthy: true
+    expect: push 页无店铺下拉
+  - id: ps01-config
+    as: e2e
+    type: navigate
+    url: /maintain/config
+  - id: ps01-config-chk
+    as: e2e
+    type: js_assert
+    script: 'document.querySelector("select[name=shop_id]") === null'
+    truthy: true
+    expect: config 页无店铺下拉
+  - id: ps01-shot
+    as: e2e
+    type: screenshot
+    name: ps01-配置页无下拉
+  # ---------- PS02 shop_id 参数静默忽略 ----------
+  - id: ps02-open
+    as: e2e
+    type: navigate
+    url: /maintain/calc?shop_id=7
+  - id: ps02-content
+    as: e2e
+    type: wait
+    selector: '.content'
+  - id: ps02-empty
+    as: e2e
+    type: js_assert
+    script: '(document.querySelector("main.content") || { textContent: "" }).textContent.includes("队列还是空的")'
+    truthy: true
+    expect: 仍为本店（E2E 店）空态
+  # ---------- PS03 明细接口跨店 404 ----------
+  - id: ps03-api
+    as: e2e
+    type: http
+    method: GET
+    path: /maintain/calc/1/detail
+    expectStatus: 404
+    expectJson:
+      code: -1
+    expect: 非 admin 取他店明细 → 404 JSON
+teardown:
+  - id: td-login-open
+    as: admin
+    type: navigate
+    url: /login
+  - id: td-login-user
+    as: admin
+    type: fill
+    selector: 'input[name="username"]'
+    value: ${var:ADMIN_USER}
+  - id: td-login-pw
+    as: admin
+    type: fill
+    selector: 'input[name="password"]'
+    value: ${var:ADMIN_PW}
+  - id: td-login-submit
+    as: admin
+    type: click
+    selector: 'form button[type="submit"]'
+  - id: td-topbar
+    as: admin
+    type: wait
+    selector: '.topbar .usermenu'
+  - id: td-open
+    as: admin
+    type: navigate
+    url: /settings/shop
+  - id: td-table
+    as: admin
+    type: wait
+    selector: '.tblwrap table.tbl'
+  - id: td-toggle
+    as: admin
+    type: click
+    selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+    when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
+    onFail: warn
+    expect: 停用 E2E 店留档（仅当仍在营）
