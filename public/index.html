@@ -30,6 +30,11 @@ body{margin:0;font:14px/1.55 var(--f-body);color:var(--fg);background:var(--bg);
 .app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
 .app.solo{display:block}
 .app.solo main{max-width:none;padding:0 0 40px}
+th,td{vertical-align:middle !important}
+td .b{display:inline-block}
+.shots img{max-width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
+.shots figure{margin:0}
+.shots figcaption{font-size:11px;color:var(--mut);margin-top:2px;overflow-wrap:anywhere}
 .app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 aside{background:var(--card);border-right:1px solid var(--line);padding-block:18px;padding-left:env(safe-area-inset-left,0px);position:sticky;top:0;align-self:start;min-height:100vh}
 aside .back{display:block;padding:4px 16px 14px;color:var(--pri);cursor:pointer;font-size:13px}
@@ -110,6 +115,11 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .app.solo main{max-width:none;padding:0 0 40px}
+th,td{vertical-align:middle !important}
+td .b{display:inline-block}
+.shots img{max-width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
+.shots figure{margin:0}
+.shots figcaption{font-size:11px;color:var(--mut);margin-top:2px;overflow-wrap:anywhere}
 .app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 </style></head><body>
 <div class="app" id="app"><aside id="side" hidden></aside><main id="main"></main></div>
@@ -325,6 +335,7 @@ async function viewRun() {
 /* ---------- 渲染循环 ---------- */
 async function triggerRun(pid, file, btn) {
   var old = btn ? btn.textContent : '';
+  if (!window.confirm('开始执行场景「' + file + '」？浏览器会在后台运行并逐步留痕。')) return;
   if (btn) { btn.disabled = true; btn.textContent = '启动中…'; }
   try {
     var r = await api('/api/projects/' + pid + '/runs', j('POST', { file: file, triggeredBy: 'web' }));
