@@ -231,7 +231,7 @@ async function tabScenarios(p, counts) {
     var last = s.lastRun;
     h += '<tr><td><b title="' + esc(s.file) + '">' + esc(s.name) + '</b></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
       + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
-      + '<td>' + (last ? '<button class="link" title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">查看结果</button> ' : '')
+      + '<td>' + (last ? '<button title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">查看结果</button> ' : '')
       + '<button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
       + '<td><button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
   });
