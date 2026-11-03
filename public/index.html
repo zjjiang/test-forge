@@ -106,9 +106,11 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 @media (max-width:900px){.scn-md{grid-template-columns:1fr}}
 .scn-ta{width:100%;min-height:170px;font-family:var(--f-mono);font-size:12.5px;line-height:1.55;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);box-sizing:border-box;resize:vertical}
 #scn-yaml{min-height:440px}
-.scn-tabs{display:flex;gap:6px;margin:18px 0 10px}
-.scn-tabs button{border-radius:8px 8px 0 0}
+.scn-topbar{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+.scn-tabs{display:flex;gap:6px}
+.scn-tabs button{border-radius:8px}
 .scn-tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+.scn-topbar button{white-space:nowrap}
 .scn-status{font-size:12px;margin-top:6px;min-height:16px}
 .flow details.small{margin-top:6px;font-size:13px}
 .flow details.small summary{cursor:pointer;color:var(--accent);font-weight:600;user-select:none;list-style:none}
@@ -360,17 +362,19 @@ async function tabWorkbench(p) {
     + '<span style="margin-left:auto"></span>'
     + '<button onclick="runScn(this)">▶ 运行本场景</button></div>';
   var onDesc = S.scnTab !== 'yaml';
-  h += '<div class="row" style="justify-content:flex-start;margin-top:14px">'
+  /* tab 与操作按钮拉平为一行 */
+  h += '<div class="scn-topbar">'
+    + '<div class="scn-tabs">'
+    + '<button id="scn-tab-desc" class="' + (onDesc ? 'on' : '') + '" onclick="scnSwitch(\'desc\')">业务描述</button>'
+    + '<button id="scn-tab-yaml" class="' + (onDesc ? '' : 'on') + '" onclick="scnSwitch(\'yaml\')">YAML 配置</button>'
+    + '</div>'
+    + '<span style="flex:1"></span>'
     + '<button onclick="openRenameModal()">改名</button>'
     + '<button onclick="saveScnDesc(this)">保存描述</button>'
     + '<button onclick="aiOptDesc(this)">AI 优化描述</button>'
     + '<button onclick="aiGenYaml(this)">AI 优化 YAML</button>'
-    + '<span class="mut">流程：写描述 → AI 优化描述 → 确认保存 → AI 优化 YAML → 校验保存</span></div>';
-  h += '<div id="scn-ai-status" class="scn-status"></div>';
-  h += '<div class="scn-tabs">'
-    + '<button id="scn-tab-desc" class="' + (onDesc ? 'on' : '') + '" onclick="scnSwitch(\'desc\')">业务描述</button>'
-    + '<button id="scn-tab-yaml" class="' + (onDesc ? '' : 'on') + '" onclick="scnSwitch(\'yaml\')">YAML 配置</button>'
     + '</div>';
+  h += '<div id="scn-ai-status" class="scn-status">流程：写描述 → AI 优化描述 → 确认保存 → AI 优化 YAML → 校验保存</div>';
   h += '<div id="scn-pane-desc"' + (onDesc ? '' : ' hidden') + '>';
   h += '<div class="mut" style="margin-bottom:6px">用业务语言写：这个场景测什么、分哪些环节、每个环节验收什么。描述是源头，AI 按它优化 YAML。</div>';
   h += '<div class="scn-mdwrap"><textarea id="scn-desc"></textarea></div>';
