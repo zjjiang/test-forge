@@ -96,8 +96,8 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .flow > .srow{grid-column:1/-1;font-size:12px;display:flex;gap:8px;align-items:baseline;border-bottom:1px dashed var(--line);padding:3px 2px}
 .flow .srow .mut{margin-left:auto;white-space:nowrap}
 .flow .srow b{white-space:nowrap}
-.scn-md{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
-.scn-md .scn-ta{min-height:260px}
+#scn-desc .editor-toolbar{border-color:var(--line)}
+.scn-mdwrap .CodeMirror,.scn-mdwrap .editor-preview-side{min-height:280px}
 .md-body{font-size:13px;line-height:1.7;border:1px solid var(--line);border-radius:6px;background:var(--th,#f8f9fb);padding:12px 16px;min-height:260px;overflow-wrap:anywhere}
 .md-body h1,.md-body h2,.md-body h3{margin:.6em 0 .3em;font-size:14px}
 .md-body blockquote{margin:.4em 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--mut,#5d6679)}
@@ -153,7 +153,9 @@ td .b{display:inline-block}
 .app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 </style></head><body>
 <div class="app" id="app"><aside id="side" hidden></aside><main id="main"></main></div>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/easymde@2.18.0/dist/easymde.min.js"></script>
 <script>
 /* API 层：全部走 Fastify，统一信封 {success,data,error} */
 async function api(path, opts) {
@@ -311,23 +313,21 @@ async function tabScenarios(p, counts) {
 function openScn(file) { go({ view: 'project', p: S.p, tab: 'scenarios', scn: file }); }
 function backScn() { go({ view: 'project', p: S.p, tab: 'scenarios', scn: null }); }
 async function tabWorkbench(p) {
+  destroyScnEditor();
   var src;
   try {
     src = await api('/api/projects/' + p.id + '/scenarios/' + encodeURIComponent(S.scn) + '/source');
   } catch (e) {
     return '<div class="card"><button onclick="backScn()">← 返回列表</button><div class="err" style="margin-top:10px">' + esc(e.message) + '</div></div>';
   }
-  setTimeout(renderDescPreview, 0);
+  setTimeout(function () { initScnEditor(src.description); }, 0);
   var h = '<div class="card">';
   h += '<div class="row" style="justify-content:flex-start"><button onclick="backScn()">← 返回列表</button><b style="margin-left:8px">' + esc(S.scn) + '</b>'
     + '<span style="margin-left:auto"></span>'
     + '<button onclick="runScn(this)">▶ 运行本场景</button></div>';
   h += '<h3 style="margin-top:16px">业务描述</h3>';
   h += '<div class="mut" style="margin-bottom:6px">用业务语言写：这个场景测什么、分哪些环节、每个环节验收什么。AI 会按这里的描述生成/优化 YAML，描述是源头。</div>';
-  h += '<div class="scn-md">';
-  h += '<textarea id="scn-desc" class="scn-ta" placeholder="例：覆盖店铺配置页的主流程与权限边界：\n1. 管理员登录，新增 E2E 店铺，flash 提示已创建\n2. 编辑店铺填写信科凭证，ID 明文回显、Cookie 掩码\n3. 停用/再启用状态翻转\n4. 非 admin 只能看本店、写接口 403\n5. 收尾停用 E2E 店留档">' + esc(src.description) + '</textarea>';
-  h += '<div class="md-body" id="scn-desc-preview"></div>';
-  h += '</div>';
+  h += '<div class="scn-mdwrap"><textarea id="scn-desc"></textarea></div>';
   h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
     + '<button onclick="saveScnDesc(this)">保存描述</button>'
     + '<button onclick="aiGenYaml(this)">AI 生成 / 优化 YAML</button>'
@@ -341,21 +341,54 @@ async function tabWorkbench(p) {
   h += '<div id="scn-yaml-status" class="scn-status"></div>';
   return h + '</div>';
 }
-function renderDescPreview() {
-  var el = document.getElementById('scn-desc-preview');
+var scnMde = null;
+function initScnEditor(initial) {
   var ta = document.getElementById('scn-desc');
-  if (el === null || ta === null) return;
-  var mdText = ta.value;
-  el.innerHTML = (window.marked && mdText.trim() !== '') ? window.marked.parse(mdText, { breaks: true }) : '<span class="mut">（预览：左边输入 Markdown，这里实时渲染）</span>';
+  if (ta === null || !window.EasyMDE) return;
+  ta.value = initial;
+  scnMde = new EasyMDE({
+    element: ta,
+    spellChecker: false,
+    status: false,
+    autosave: { enabled: false, uniqueId: 'scn-desc', timeFormat: { second: '0' } },
+    sideBySideFullscreen: false,
+    renderingConfig: { breaks: true },
+    initialValue: initial,
+    toolbar: [
+      { name: 'bold', action: EasyMDE.toggleBold, title: '加粗', text: 'B' },
+      { name: 'italic', action: EasyMDE.toggleItalic, title: '斜体', text: 'I' },
+      { name: 'heading', action: EasyMDE.toggleHeadingSmaller, title: '标题', text: 'H' },
+      '|',
+      { name: 'ordered-list', action: EasyMDE.toggleOrderedList, title: '有序列表', text: '1.' },
+      { name: 'unordered-list', action: EasyMDE.toggleUnorderedList, title: '无序列表', text: '•' },
+      { name: 'quote', action: EasyMDE.toggleBlockquote, title: '引用', text: '❝' },
+      '|',
+      { name: 'code', action: EasyMDE.toggleCodeBlock, title: '代码块', text: '</>' },
+      { name: 'link', action: EasyMDE.drawLink, title: '链接', text: '🔗' },
+      '|',
+      { name: 'preview', action: EasyMDE.togglePreview, title: '预览', text: '👁' },
+      { name: 'side-by-side', action: EasyMDE.toggleSideBySide, title: '双栏编辑+预览', text: '⇔' }
+    ],
+    previewRender: function (plainText) {
+      return window.marked ? window.marked.parse(plainText, { breaks: true }) : plainText;
+    }
+  });
 }
-document.addEventListener('input', function (e) {
-  if (e.target && e.target.id === 'scn-desc') renderDescPreview();
-});
+function scnDescValue() {
+  if (scnMde !== null) return scnMde.value();
+  var ta = document.getElementById('scn-desc');
+  return ta === null ? '' : ta.value;
+}
+function destroyScnEditor() {
+  if (scnMde === null) return;
+  try { scnMde.toTextArea(); } catch (e) { /* innerHTML 已重建时忽略 */ }
+  scnMde = null;
+}
 async function saveScnDesc(btn) {
   var old = btn.textContent;
   btn.disabled = true; btn.textContent = '保存中…';
   try {
-    await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/description', j('PUT', { content: document.getElementById('scn-desc').value }));
+    await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/description', j('PUT', { content: scnDescValue() }));
     document.getElementById('scn-ai-status').textContent = '描述已保存（' + S.scn.replace(/\.ya?ml$/, '') + '.md）';
   } catch (e) { window.alert('保存失败：' + e.message); }
   btn.disabled = false; btn.textContent = old;
@@ -366,7 +399,7 @@ async function aiGenYaml(btn) {
   btn.disabled = true; btn.textContent = 'AI 生成中…（可能要一两分钟）';
   st.textContent = '';
   try {
-    var r = await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/ai-generate', j('POST', { description: document.getElementById('scn-desc').value }));
+    var r = await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/ai-generate', j('POST', { description: scnDescValue() }));
     document.getElementById('scn-yaml').value = r.yaml;
     st.textContent = 'AI 已生成（耗时 ' + fmtMs(r.ms) + '）。请检查 YAML 内容后点「校验并保存」。';
   } catch (e) { st.textContent = 'AI 生成失败：' + e.message; }
