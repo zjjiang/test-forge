@@ -106,6 +106,9 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 @media (max-width:900px){.scn-md{grid-template-columns:1fr}}
 .scn-ta{width:100%;min-height:170px;font-family:var(--f-mono);font-size:12.5px;line-height:1.55;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);box-sizing:border-box;resize:vertical}
 #scn-yaml{min-height:440px}
+.scn-tabs{display:flex;gap:6px;margin:18px 0 10px}
+.scn-tabs button{border-radius:8px 8px 0 0}
+.scn-tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
 .scn-status{font-size:12px;margin-top:6px;min-height:16px}
 .flow details.small{margin-top:6px;font-size:13px}
 .flow details.small summary{cursor:pointer;color:var(--accent);font-weight:600;user-select:none;list-style:none}
@@ -170,7 +173,7 @@ async function api(path, opts) {
 }
 const j = (method, data) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
 
-var S = { view: 'home', p: null, tab: 'scenarios', run: null, reveal: {}, edit: null, filter: null, creating: false, poll: null, scn: null };
+var S = { view: 'home', p: null, tab: 'scenarios', run: null, reveal: {}, edit: null, filter: null, creating: false, poll: null, scn: null, scnTab: 'desc' };
 function go(o) { Object.assign(S, o); if (S.poll) { clearInterval(S.poll); S.poll = null; } if (typeof lb !== 'undefined' && !lb.hidden) closeLb(); render(); }
 
 var CACHE = { projects: null, project: {}, vars: {}, scenarios: {}, runs: {}, run: {} };
@@ -338,7 +341,7 @@ async function tabScenarios(p, counts) {
 }
 
 /* ---------- 场景工作台：业务描述 → AI 生成/优化 YAML ---------- */
-function openScn(file) { go({ view: 'project', p: S.p, tab: 'scenarios', scn: file }); }
+function openScn(file) { go({ view: 'project', p: S.p, tab: 'scenarios', scn: file, scnTab: 'desc' }); }
 function backScn() { go({ view: 'project', p: S.p, tab: 'scenarios', scn: null }); }
 async function tabWorkbench(p) {
   destroyScnEditor();
@@ -358,22 +361,39 @@ async function tabWorkbench(p) {
     + '<button onclick="renameScn(this)">改名</button>'
     + '<span style="margin-left:auto"></span>'
     + '<button onclick="runScn(this)">▶ 运行本场景</button></div>';
-  h += '<h3 style="margin-top:16px">业务描述</h3>';
-  h += '<div class="mut" style="margin-bottom:6px">用业务语言写：这个场景测什么、分哪些环节、每个环节验收什么。AI 会按这里的描述生成/优化 YAML，描述是源头。</div>';
-  h += '<div class="scn-mdwrap"><textarea id="scn-desc"></textarea></div>';
-  h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
+  var onDesc = S.scnTab !== 'yaml';
+  h += '<div class="row" style="justify-content:flex-start;margin-top:14px">'
     + '<button onclick="saveScnDesc(this)">保存描述</button>'
     + '<button onclick="aiOptDesc(this)">AI 优化描述</button>'
-    + '<button onclick="aiGenYaml(this)">AI 生成 / 优化 YAML</button>'
-    + '<span class="mut">流程：写描述 → AI 优化描述 → 确认保存 → AI 生成 YAML → 校验保存</span></div>';
+    + '<button onclick="aiGenYaml(this)">AI 优化 YAML</button>'
+    + '<span class="mut">流程：写描述 → AI 优化描述 → 确认保存 → AI 优化 YAML → 校验保存</span></div>';
   h += '<div id="scn-ai-status" class="scn-status"></div>';
-  h += '<h3 style="margin-top:18px">YAML 配置</h3>';
+  h += '<div class="scn-tabs">'
+    + '<button id="scn-tab-desc" class="' + (onDesc ? 'on' : '') + '" onclick="scnSwitch(\'desc\')">业务描述</button>'
+    + '<button id="scn-tab-yaml" class="' + (onDesc ? '' : 'on') + '" onclick="scnSwitch(\'yaml\')">YAML 配置</button>'
+    + '</div>';
+  h += '<div id="scn-pane-desc"' + (onDesc ? '' : ' hidden') + '>';
+  h += '<div class="mut" style="margin-bottom:6px">用业务语言写：这个场景测什么、分哪些环节、每个环节验收什么。描述是源头，AI 按它优化 YAML。</div>';
+  h += '<div class="scn-mdwrap"><textarea id="scn-desc"></textarea></div>';
+  h += '</div>';
+  h += '<div id="scn-pane-yaml"' + (onDesc ? ' hidden' : '') + '>';
   h += '<textarea id="scn-yaml" class="scn-ta" spellcheck="false">' + esc(src.yaml) + '</textarea>';
   h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
     + '<button onclick="saveScnYaml(this)">校验并保存 YAML</button>'
     + '<span class="mut">保存前会先跑 schema 校验；也可以直接改仓库文件后刷新</span></div>';
   h += '<div id="scn-yaml-status" class="scn-status"></div>';
+  h += '</div>';
   return h + '</div>';
+}
+function scnSwitch(which) {
+  S.scnTab = which;
+  var d = document.getElementById('scn-pane-desc'), y = document.getElementById('scn-pane-yaml');
+  if (d === null || y === null) return;
+  d.hidden = which !== 'desc';
+  y.hidden = which !== 'yaml';
+  document.getElementById('scn-tab-desc').classList.toggle('on', which === 'desc');
+  document.getElementById('scn-tab-yaml').classList.toggle('on', which === 'yaml');
+  if (which === 'desc' && scnMde !== null) { try { scnMde.codemirror.refresh(); } catch (e) { /* 忽略 */ } }
 }
 var scnMde = null;
 function initScnEditor(initial) {
@@ -435,7 +455,8 @@ async function aiGenYaml(btn) {
   try {
     var r = await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/ai-generate', j('POST', { description: scnDescValue() }));
     document.getElementById('scn-yaml').value = r.yaml;
-    st.textContent = 'AI 已生成（耗时 ' + fmtMs(r.ms) + '）。请检查 YAML 内容后点「校验并保存」。';
+    scnSwitch('yaml');
+    st.textContent = 'AI 已优化（耗时 ' + fmtMs(r.ms) + '）。请检查 YAML 内容后点「校验并保存」。';
   } catch (e) { st.textContent = 'AI 生成失败：' + e.message; }
   btn.disabled = false; btn.textContent = old;
 }
