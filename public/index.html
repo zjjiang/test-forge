@@ -356,7 +356,6 @@ async function tabWorkbench(p) {
   h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
     + '<button onclick="saveScnDesc(this)">保存描述</button>'
     + '<button onclick="aiGenYaml(this)">AI 生成 / 优化 YAML</button>'
-    + '<button title="配置 GLM 模型与 API Key" onclick="openAiModal()">⚙ AI 配置' + (CACHE.ai && CACHE.ai.configured ? ' ✓' : '') + '</button>'
     + '<span class="mut">AI 会读取描述和当前 YAML，返回新版 YAML 到下方，确认后再保存</span></div>';
   h += '<div id="scn-ai-status" class="scn-status"></div>';
   h += '<h3 style="margin-top:18px">YAML 配置</h3>';
