@@ -353,16 +353,15 @@ async function tabWorkbench(p) {
     return '<div class="card"><button onclick="backScn()">← 返回列表</button><div class="err" style="margin-top:10px">' + esc(e.message) + '</div></div>';
   }
   var nm = /^name:\s*(.+)$/m.exec(src.yaml);
-  curName = nm ? nm[1].trim() : '';
+  curName = nm ? nm[1].trim() : '';  // 供改名弹窗取当前名
   setTimeout(function () { initScnEditor(src.description); }, 0);
   var h = '<div class="card">';
-  h += '<div class="row" style="justify-content:flex-start"><button onclick="backScn()">← 返回列表</button><b style="margin-left:8px">' + esc(S.scn) + '</b>'
-    + '<input id="scn-name" value="' + esc(curName) + '" title="场景名（显示名，改完点「改名」）" style="width:180px;margin-left:8px">'
-    + '<button onclick="renameScn(this)">改名</button>'
+  h += '<div class="row"><button onclick="backScn()">← 返回列表</button><b style="margin-left:8px">' + esc(S.scn) + '</b>'
     + '<span style="margin-left:auto"></span>'
     + '<button onclick="runScn(this)">▶ 运行本场景</button></div>';
   var onDesc = S.scnTab !== 'yaml';
   h += '<div class="row" style="justify-content:flex-start;margin-top:14px">'
+    + '<button onclick="openRenameModal()">改名</button>'
     + '<button onclick="saveScnDesc(this)">保存描述</button>'
     + '<button onclick="aiOptDesc(this)">AI 优化描述</button>'
     + '<button onclick="aiGenYaml(this)">AI 优化 YAML</button>'
@@ -508,13 +507,21 @@ async function createScenario() {
     openScn(r.file);
   } catch (e) { errEl.textContent = '创建失败：' + e.message; }
 }
-/* ---------- 工作台：改名 + AI 优化描述 ---------- */
-async function renameScn(btn) {
-  var st = document.getElementById('scn-yaml-status');
-  var v = document.getElementById('scn-name').value.trim();
-  if (v === '') { st.textContent = '场景名不能为空'; return; }
+/* ---------- 工作台：改名弹窗 + AI 优化描述 ---------- */
+function openRenameModal() {
   var y = document.getElementById('scn-yaml').value;
-  if (!/^name:/m.test(y)) { st.textContent = 'YAML 里没有 name 字段'; return; }
+  var m = /^name:\s*(.+)$/m.exec(y);
+  openModal('<div class="form"><b>修改场景名</b>'
+    + '<label>场景名（运行历史里的显示名）<input id="rn-name" value="' + esc(m ? m[1].trim() : '') + '"></label>'
+    + '<div id="rn-err" class="mut" style="margin-bottom:8px"></div>'
+    + '<div class="row" style="justify-content:flex-start;margin:0"><button class="pri" onclick="doRename(this)">保存新名字</button></div></div>');
+}
+async function doRename(btn) {
+  var errEl = document.getElementById('rn-err');
+  var v = document.getElementById('rn-name').value.trim();
+  if (v === '') { errEl.textContent = '场景名不能为空'; return; }
+  var y = document.getElementById('scn-yaml').value;
+  if (!/^name:/m.test(y)) { errEl.textContent = 'YAML 里没有 name 字段'; return; }
   var old = btn.textContent;
   btn.disabled = true; btn.textContent = '保存中…';
   try {
@@ -522,8 +529,10 @@ async function renameScn(btn) {
     await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/yaml', j('PUT', { content: y2 }));
     document.getElementById('scn-yaml').value = y2;
     CACHE.scenarios[S.p] = null;
-    st.textContent = '✅ 场景名已改为「' + v + '」（历史记录仍按旧名保留）';
-  } catch (e) { st.textContent = '改名失败：' + e.message; }
+    closeModal();
+    var st = document.getElementById('scn-ai-status');
+    if (st !== null) st.textContent = '✅ 场景名已改为「' + v + '」（历史记录仍按旧名保留）';
+  } catch (e) { errEl.textContent = '改名失败：' + e.message; }
   btn.disabled = false; btn.textContent = old;
 }
 async function aiOptDesc(btn) {
