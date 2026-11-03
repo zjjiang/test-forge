@@ -6,7 +6,7 @@
 /* Layout: 侧栏项目导航 + 右侧工作区；运行详情为「步骤轨道 | 证据面板」两栏，窄屏堆叠 */
 :root{
  --bg:#f4f5f7;--card:#ffffff;--line:#dde1e8;--fg:#1a2030;--mut:#5d6679;
- --pri:#2f5bd3;--pri-soft:#e9eefc;--accent:#2f5bd3;
+ --pri:#2f5bd3;--pri-soft:#e9eefc;--accent:#2f5bd3;--ai:#7c3aed;
  --side:#151b29;--side-fg:#c3cad8;--side-on:#232c40;--side-mut:#78829a;
  --ok:#24804a;--bad:#c2362f;--rev:#b86a00;--skip:#79808c;
  --th:#f8f9fb;--code:#eef0f4;--warn-bg:#fff5e6;--warn-line:#f0cf9a;
@@ -17,12 +17,12 @@
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;
  --bg:#10141d;--card:#171c28;--line:#2a3142;--fg:#e3e7ef;--mut:#959eb2;
- --pri:#7f9cff;--pri-soft:#1f2a47;--accent:#7f9cff;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
+ --pri:#7f9cff;--pri-soft:#1f2a47;--accent:#7f9cff;--ai:#8b5cf6;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
  --ok:#4cb877;--bad:#ef6b62;--rev:#e3a043;--skip:#8a919e;
  --th:#1b2130;--code:#222938;--warn-bg:#2b2213;--warn-line:#5c4518;--stripe-a:#1d2331;--stripe-b:#212839}}
 :root[data-theme="dark"]{color-scheme:dark;
  --bg:#10141d;--card:#171c28;--line:#2a3142;--fg:#e3e7ef;--mut:#959eb2;
- --pri:#7f9cff;--pri-soft:#1f2a47;--accent:#7f9cff;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
+ --pri:#7f9cff;--pri-soft:#1f2a47;--accent:#7f9cff;--ai:#8b5cf6;--side:#0b0e15;--side-fg:#c3cad8;--side-on:#1c2333;--side-mut:#6d768c;
  --ok:#4cb877;--bad:#ef6b62;--rev:#e3a043;--skip:#8a919e;
  --th:#1b2130;--code:#222938;--warn-bg:#2b2213;--warn-line:#5c4518;--stripe-a:#1d2331;--stripe-b:#212839}
 *{box-sizing:border-box}
@@ -82,6 +82,7 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--pri-soft)}
 input,select{font:inherit;color:var(--fg);background:var(--card);padding:5px 8px;border:1px solid var(--line);border-radius:4px;width:100%}
 button{font:inherit;color:var(--fg);padding:6px 12px;border-radius:4px;border:1px solid var(--line);background:var(--card);cursor:pointer}
 button.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
+button.ai{background:var(--ai);color:#fff;border-color:var(--ai)}
 button.link{border:0;background:none;color:var(--pri);padding:2px 4px}
 button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
 .row{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap}
@@ -360,7 +361,7 @@ async function tabWorkbench(p) {
   var h = '<div class="card">';
   h += '<div class="row"><button onclick="backScn()">← 返回列表</button><b style="margin-left:8px">' + esc(S.scn) + '</b>'
     + '<span style="margin-left:auto"></span>'
-    + '<button onclick="runScn(this)">▶ 运行本场景</button></div>';
+    + '<button class="pri" onclick="runScn(this)">▶ 运行本场景</button></div>';
   var onDesc = S.scnTab !== 'yaml';
   /* tab 与操作按钮拉平为一行 */
   h += '<div class="scn-topbar">'
@@ -370,9 +371,9 @@ async function tabWorkbench(p) {
     + '</div>'
     + '<span style="flex:1"></span>'
     + '<button onclick="openRenameModal()">改名</button>'
-    + '<button onclick="saveScnDesc(this)">保存描述</button>'
-    + '<button onclick="aiOptDesc(this)">AI 优化描述</button>'
-    + '<button onclick="aiGenYaml(this)">AI 优化 YAML</button>'
+    + '<button class="pri" onclick="saveScnDesc(this)">保存描述</button>'
+    + '<button class="ai" onclick="aiOptDesc(this)">AI 优化描述</button>'
+    + '<button class="ai" onclick="aiGenYaml(this)">AI 优化 YAML</button>'
     + '</div>';
   h += '<div id="scn-ai-status" class="scn-status">流程：写描述 → AI 优化描述 → 确认保存 → AI 优化 YAML → 校验保存</div>';
   h += '<div id="scn-pane-desc"' + (onDesc ? '' : ' hidden') + '>';
