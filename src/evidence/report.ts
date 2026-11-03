@@ -42,6 +42,14 @@ ${asserts ? `<table><tr><th>断言</th><th>类型</th><th>预期</th><th>实际<
 }
 
 /** 生成自包含的 report.html：相对路径引用截图，整个 run 目录可拷走。 */
+/** ISO 时间转本地时区可读格式（报告整体拷走后仍按生成机器时区显示） */
+function localTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number): string => (n < 10 ? "0" : "") + n;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 export function renderReport(r: RunResult, warnings: readonly string[] = []): string {
 	const det = r.steps.flatMap((s) => s.assertions).filter((a) => a.kind === 'det');
 	const ai = r.steps.flatMap((s) => s.assertions).filter((a) => a.kind === 'ai');
@@ -85,7 +93,7 @@ th{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em
 @media (max-width:600px){.shots{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
 <h1>${esc(r.scenarioName)} ${badge(r.status)}</h1>
-<div class="meta">run ${esc(r.runId)} · 项目 ${esc(r.projectId)} · ${esc(r.startedAt)} → ${esc(r.finishedAt)} · ${(r.durationMs / 1000).toFixed(1)}s</div>
+<div class="meta">run ${esc(r.runId)} · 项目 ${esc(r.projectId)} · ${esc(localTime(r.startedAt))} → ${esc(localTime(r.finishedAt))}（本地时区）· ${(r.durationMs / 1000).toFixed(1)}s</div>
 <div class="stats">
 <span>步骤 <b>${r.steps.length}</b></span>
 <span>确定性断言 <b>${det.filter((a) => a.ok).length}/${det.length}</b></span>

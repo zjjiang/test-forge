@@ -176,6 +176,14 @@ function go(o) { Object.assign(S, o); if (S.poll) { clearInterval(S.poll); S.pol
 var CACHE = { projects: null, project: {}, vars: {}, scenarios: {}, runs: {}, run: {} };
 function badge(s) { var m = { passed: '通过', failed: '失败', needs_review: '待人工复核', skipped: '跳过', running: '执行中' }; return '<span class="b ' + s + '">' + (m[s] || s) + '</span>'; }
 function fmtMs(ms) { return ms >= 10000 ? (ms / 1000).toFixed(0) + 's' : ms + 'ms'; }
+/* ISO 时间按浏览器本地时区显示（+8）；run id 本身已是本地时间 */
+function fmtTime(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso).slice(5, 16).replace('T', ' ');
+  var p = function (n) { return (n < 10 ? '0' : '') + n; };
+  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
 /* ---------- 首页 ---------- */
@@ -201,12 +209,12 @@ async function viewHome() {
     h += '<button class="pcard" onclick="openProject(\'' + p.id + '\')"><div class="ph"><b>' + esc(p.name) + '</b>' + (last ? badge(last.status) : '') + '</div>'
       + '<div class="mut">' + esc(p.description) + '</div><code>' + esc(p.baseUrl) + '</code>'
       + '<dl><div><dt>执行</dt><dd>' + rs.length + '</dd></div><div><dt>通过率</dt><dd>' + passRate(rs) + '</dd></div></dl>'
-      + '<div class="pf">' + strip(rs) + (last ? '<span class="mut">最近 ' + esc((last.startedAt || '').slice(5, 16).replace('T', ' ')) + '</span>' : '') + '</div></button>';
+      + '<div class="pf">' + strip(rs) + (last ? '<span class="mut">最近 ' + esc(fmtTime(last.startedAt)) + '</span>' : '') + '</div></button>';
   }
   h += '</div><h3>最近执行</h3><div class="card"><table><tr><th>Run ID</th><th>项目</th><th>场景</th><th>状态</th><th>触发</th><th>时间</th></tr>';
   if (!allRuns.length) h += '<tr><td colspan="6" class="empty">还没有执行记录。</td></tr>';
   for (var r of allRuns) {
-    h += '<tr class="click" onclick="openRun(\'' + r.projectId + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.projectId) + '</td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc((r.startedAt || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
+    h += '<tr class="click" onclick="openRun(\'' + r.projectId + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.projectId) + '</td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc(fmtTime(r.startedAt)) + '</td></tr>';
   }
   return h + '</table></div></div>';
 }
@@ -319,7 +327,7 @@ async function tabScenarios(p, counts) {
   h += '<h3>执行记录</h3><div class="card"><table><tr><th>Run ID</th><th>场景</th><th>状态</th><th>耗时</th><th>触发</th><th>时间</th></tr>';
   if (!CACHE.runs[S.p].length) h += '<tr><td colspan="6" class="empty">还没有执行记录。点上面的「运行」开始第一次执行。</td></tr>';
   CACHE.runs[S.p].forEach(function (r) {
-    h += '<tr class="click" onclick="openRun(\'' + p.id + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + fmtMs(r.durationMs) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc((r.startedAt || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
+    h += '<tr class="click" onclick="openRun(\'' + p.id + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + fmtMs(r.durationMs) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc(fmtTime(r.startedAt)) + '</td></tr>';
   });
   return h + '</table></div>';
 }
@@ -503,7 +511,7 @@ async function viewRun() {
   S.shots = [];
   var h = '<div class="crumb"><a onclick="home()">首页</a> / <a onclick="openProject(\'' + S.p + '\')">' + esc(S.p) + '</a> / Run ' + esc(run.id) + '</div>';
   h += '<h2>' + esc(run.scenarioName) + ' ' + badge(run.status) + '</h2>';
-  h += '<div class="mut" style="margin-bottom:10px">run <code>' + esc(run.id) + '</code> · 耗时 ' + fmtMs(run.durationMs) + ' · 断言（确定性/AI）' + det + ' / ' + ai + ' · 触发 ' + esc(run.triggeredBy || '—') + ' · ' + esc((run.startedAt || '').slice(5, 16).replace('T', ' ')) + '</div>';
+  h += '<div class="mut" style="margin-bottom:10px">run <code>' + esc(run.id) + '</code> · 耗时 ' + fmtMs(run.durationMs) + ' · 断言（确定性/AI）' + det + ' / ' + ai + ' · 触发 ' + esc(run.triggeredBy || '—') + ' · ' + esc(fmtTime(run.startedAt)) + '</div>';
   h += '<div class="row" style="justify-content:flex-start;margin-bottom:14px"><a href="' + base + 'report.html" target="_blank"><button>完整报告</button></a><span class="mut">细节： <a href="' + base + 'summary.json" target="_blank">summary.json</a> · <a href="' + base + 'scenario.yaml" target="_blank">scenario.yaml</a> · <a href="' + base + 'trace-' + esc(steps.length && steps[0].actor ? steps[0].actor : 'user') + '.zip">trace.zip</a></span></div>';
   var bad = steps.filter(function (st) { return st.status === 'failed' || st.status === 'warned'; });
   if (bad.length) {
