@@ -108,10 +108,12 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .scn-ta{width:100%;min-height:170px;font-family:var(--f-mono);font-size:12.5px;line-height:1.55;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);box-sizing:border-box;resize:vertical}
 #scn-yaml{min-height:440px}
 .scn-topbar{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
-.scn-tabs{display:flex;gap:6px}
-.scn-tabs button{border-radius:8px}
-.scn-tabs button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
-.scn-topbar button{white-space:nowrap}
+.scn-topbar > button{white-space:nowrap}
+/* 经典 tab：文字 + 下划线指示，与内容面板相连 */
+.scn-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:0}
+.scn-tabs button{border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;background:none;padding:8px 16px;color:var(--mut);margin-bottom:-1px}
+.scn-tabs button.on{color:var(--pri);border-color:var(--line);background:var(--card);border-bottom:1px solid var(--card);font-weight:600}
+.scn-panel{border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;padding:12px 14px}
 .scn-status{font-size:12px;margin-top:6px;min-height:16px}
 .flow details.small{margin-top:6px;font-size:13px}
 .flow details.small summary{cursor:pointer;color:var(--accent);font-weight:600;user-select:none;list-style:none}
@@ -376,14 +378,14 @@ async function tabWorkbench(p) {
     + '<button class="ai" onclick="aiGenYaml(this)">AI 优化 YAML</button>'
     + '</div>';
   h += '<div id="scn-ai-status" class="scn-status">流程：写描述 → AI 优化描述 → 确认保存 → AI 优化 YAML → 校验保存</div>';
-  h += '<div id="scn-pane-desc"' + (onDesc ? '' : ' hidden') + '>';
-  h += '<div class="mut" style="margin-bottom:6px">用业务语言写：这个场景测什么、分哪些环节、每个环节验收什么。描述是源头，AI 按它优化 YAML。</div>';
+  h += '<div id="scn-pane-desc" class="scn-panel"' + (onDesc ? '' : ' hidden') + '>';
+  h += '<div class="mut" style="margin-bottom:8px">用业务语言写：这个场景测什么、分哪些环节、每个环节验收什么。描述是源头，AI 按它优化 YAML。</div>';
   h += '<div class="scn-mdwrap"><textarea id="scn-desc"></textarea></div>';
   h += '</div>';
-  h += '<div id="scn-pane-yaml"' + (onDesc ? ' hidden' : '') + '>';
+  h += '<div id="scn-pane-yaml" class="scn-panel"' + (onDesc ? ' hidden' : '') + '>';
   h += '<textarea id="scn-yaml" class="scn-ta" spellcheck="false">' + esc(src.yaml) + '</textarea>';
   h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
-    + '<button onclick="saveScnYaml(this)">校验并保存 YAML</button>'
+    + '<button class="pri" onclick="saveScnYaml(this)">校验并保存 YAML</button>'
     + '<span class="mut">保存前会先跑 schema 校验；也可以直接改仓库文件后刷新</span></div>';
   h += '<div id="scn-yaml-status" class="scn-status"></div>';
   h += '</div>';
