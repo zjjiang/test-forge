@@ -96,6 +96,9 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .flow > .srow{grid-column:1/-1;font-size:12px;display:flex;gap:8px;align-items:baseline;border-bottom:1px dashed var(--line);padding:3px 2px}
 .flow .srow .mut{margin-left:auto;white-space:nowrap}
 .flow .srow b{white-space:nowrap}
+.scn-ta{width:100%;min-height:170px;font-family:var(--f-mono);font-size:12.5px;line-height:1.55;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);box-sizing:border-box;resize:vertical}
+#scn-yaml{min-height:440px}
+.scn-status{font-size:12px;margin-top:6px;min-height:16px}
 .flow details.small{margin-top:6px;font-size:13px}
 .flow details.small summary{cursor:pointer;color:var(--accent);font-weight:600;user-select:none;list-style:none}
 .flow details.small summary::before{content:'▸ ';}
@@ -152,7 +155,7 @@ async function api(path, opts) {
 }
 const j = (method, data) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
 
-var S = { view: 'home', p: null, tab: 'scenarios', run: null, reveal: {}, edit: null, filter: null, creating: false, poll: null };
+var S = { view: 'home', p: null, tab: 'scenarios', run: null, reveal: {}, edit: null, filter: null, creating: false, poll: null, scn: null };
 function go(o) { Object.assign(S, o); if (S.poll) { clearInterval(S.poll); S.poll = null; } if (typeof lb !== 'undefined' && !lb.hidden) closeLb(); render(); }
 
 var CACHE = { projects: null, project: {}, vars: {}, scenarios: {}, runs: {}, run: {} };
@@ -271,6 +274,7 @@ async function viewProject() {
   return { side: side(p, counts), body: tabGuards(p) };
 }
 async function tabScenarios(p, counts) {
+  if (S.scn !== null) return tabWorkbench(p);
   var items = CACHE.scenarios[S.p];
   var h = '<div class="card"><div class="row"><b>场景</b><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引；改动后刷新本页。</span></div><table><tr><th>场景</th><th>角色</th><th>步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
   if (!items.length) h += '<tr><td colspan="6" class="empty">还没有场景。在 scenarios/' + esc(p.id) + '/ 下放 YAML，或让 Claude Code 按需求生成。</td></tr>';
@@ -280,7 +284,7 @@ async function tabScenarios(p, counts) {
       return;
     }
     var last = s.lastRun;
-    h += '<tr><td><b title="' + esc(s.file) + '">' + esc(s.name) + '</b></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
+    h += '<tr><td><a title="打开场景工作台：' + esc(s.file) + '" onclick="openScn(\'' + esc(s.file) + '\')"><b>' + esc(s.name) + '</b></a></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
       + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
       + '<td>' + (last ? '<button title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">报告</button> ' : '')
       + '<button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
@@ -292,6 +296,73 @@ async function tabScenarios(p, counts) {
     h += '<tr class="click" onclick="openRun(\'' + p.id + '\',\'' + r.id + '\')"><td><code>' + esc(r.id) + '</code></td><td>' + esc(r.scenarioName) + '</td><td>' + badge(r.status) + '</td><td>' + fmtMs(r.durationMs) + '</td><td>' + esc(r.triggeredBy) + '</td><td class="mut">' + esc((r.startedAt || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
   });
   return h + '</table></div>';
+}
+
+/* ---------- 场景工作台：业务描述 → AI 生成/优化 YAML ---------- */
+function openScn(file) { go({ view: 'project', p: S.p, tab: 'scenarios', scn: file }); }
+function backScn() { go({ view: 'project', p: S.p, tab: 'scenarios', scn: null }); }
+async function tabWorkbench(p) {
+  var src;
+  try {
+    src = await api('/api/projects/' + p.id + '/scenarios/' + encodeURIComponent(S.scn) + '/source');
+  } catch (e) {
+    return '<div class="card"><button onclick="backScn()">← 返回列表</button><div class="err" style="margin-top:10px">' + esc(e.message) + '</div></div>';
+  }
+  var h = '<div class="card">';
+  h += '<div class="row" style="justify-content:flex-start"><button onclick="backScn()">← 返回列表</button><b style="margin-left:8px">' + esc(S.scn) + '</b>'
+    + '<span style="margin-left:auto"></span>'
+    + '<button onclick="runScn(this)">▶ 运行本场景</button></div>';
+  h += '<h3 style="margin-top:16px">业务描述</h3>';
+  h += '<div class="mut" style="margin-bottom:6px">用业务语言写：这个场景测什么、分哪些环节、每个环节验收什么。AI 会按这里的描述生成/优化 YAML，描述是源头。</div>';
+  h += '<textarea id="scn-desc" class="scn-ta" placeholder="例：覆盖店铺配置页的主流程与权限边界：\n1. 管理员登录，新增 E2E 店铺，flash 提示已创建\n2. 编辑店铺填写信科凭证，ID 明文回显、Cookie 掩码\n3. 停用/再启用状态翻转\n4. 非 admin 只能看本店、写接口 403\n5. 收尾停用 E2E 店留档">' + esc(src.description) + '</textarea>';
+  h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
+    + '<button onclick="saveScnDesc(this)">保存描述</button>'
+    + '<button onclick="aiGenYaml(this)">AI 生成 / 优化 YAML</button>'
+    + '<span class="mut">AI 会读取左侧描述和当前 YAML，返回新版 YAML 到下方，确认后再保存</span></div>';
+  h += '<div id="scn-ai-status" class="scn-status"></div>';
+  h += '<h3 style="margin-top:18px">YAML 配置</h3>';
+  h += '<textarea id="scn-yaml" class="scn-ta" spellcheck="false">' + esc(src.yaml) + '</textarea>';
+  h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
+    + '<button onclick="saveScnYaml(this)">校验并保存 YAML</button>'
+    + '<span class="mut">保存前会先跑 schema 校验；也可以直接改仓库文件后刷新</span></div>';
+  h += '<div id="scn-yaml-status" class="scn-status"></div>';
+  return h + '</div>';
+}
+async function saveScnDesc(btn) {
+  var old = btn.textContent;
+  btn.disabled = true; btn.textContent = '保存中…';
+  try {
+    await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/description', j('PUT', { content: document.getElementById('scn-desc').value }));
+    document.getElementById('scn-ai-status').textContent = '描述已保存（' + S.scn.replace(/\.ya?ml$/, '') + '.md）';
+  } catch (e) { window.alert('保存失败：' + e.message); }
+  btn.disabled = false; btn.textContent = old;
+}
+async function aiGenYaml(btn) {
+  var st = document.getElementById('scn-ai-status');
+  var old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'AI 生成中…（可能要一两分钟）';
+  st.textContent = '';
+  try {
+    var r = await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/ai-generate', j('POST', { description: document.getElementById('scn-desc').value }));
+    document.getElementById('scn-yaml').value = r.yaml;
+    st.textContent = 'AI 已生成（耗时 ' + fmtMs(r.ms) + '）。请检查 YAML 内容后点「校验并保存」。';
+  } catch (e) { st.textContent = 'AI 生成失败：' + e.message; }
+  btn.disabled = false; btn.textContent = old;
+}
+async function saveScnYaml(btn) {
+  var st = document.getElementById('scn-yaml-status');
+  var old = btn.textContent;
+  btn.disabled = true; btn.textContent = '校验中…';
+  st.textContent = '';
+  try {
+    await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/yaml', j('PUT', { content: document.getElementById('scn-yaml').value }));
+    st.textContent = '✅ 校验通过，已保存到 ' + S.scn;
+    CACHE.scenarios[S.p] = null;
+  } catch (e) { st.textContent = '校验未通过：' + e.message; }
+  btn.disabled = false; btn.textContent = old;
+}
+async function runScn(btn) {
+  await triggerRun(S.p, S.scn, btn);
 }
 
 async function tabVars(p, counts) {

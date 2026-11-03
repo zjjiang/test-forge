@@ -11,16 +11,21 @@ import {
   updateProject,
   ProjectInputError,
 } from "../store/projects.js";
-import { deleteVar, listVars, setVar, VarInputError } from "../store/vars.js";
+import { deleteVar, listVars, setVar, varSnapshot, VarInputError } from "../store/vars.js";
 import {
   aiSettingsEnv,
   aiSettingsView,
   setSetting,
   SettingInputError,
 } from "../store/settings.js";
-import { aiConfigFrom, testAi } from "../ai/glm.js";
+import { testAi } from "../ai/glm.js";
 import { listRuns, getRun } from "../store/runs.js";
 import { loadScenarioFile } from "../scenario/loader.js";
+import { parseScenario } from "../scenario/schema.js";
+import { parse as parseYaml } from "yaml";
+import { writeFile, readFile } from "node:fs/promises";
+import { aiConfigFrom, resolveAiEnv } from "../ai/glm.js";
+import { generateScenarioYaml } from "../ai/scenario-gen.js";
 import { runScenario, type SkipInfo } from "../runner/runner.js";
 import type { RunResult } from "../runner/types.js";
 
@@ -200,6 +205,82 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
       }
     }
     return ok(items, { total: items.length });
+  });
+
+  // ---- scenario source: YAML 与业务描述(.md) 的读写 + AI 生成 ----
+  const scenarioFileGuard = (f: string): boolean =>
+    !f.includes("/") && !f.includes("..") && /\.(yaml|yml)$/.test(f);
+
+  app.get("/api/projects/:id/scenarios/:file/source", async (req, rep) => {
+    const { id, file } = req.params as { id: string; file: string };
+    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+    const filePath = path.join(scenariosDir, id, file);
+    let yaml = "";
+    try {
+      yaml = await readFile(filePath, "utf8");
+    } catch {
+      return rep.code(404).send(fail("scenario file not found", 404));
+    }
+    let description = "";
+    try {
+      description = await readFile(filePath.replace(/\.ya?ml$/, ".md"), "utf8");
+    } catch {
+      /* 描述文件可缺省 */
+    }
+    return ok({ yaml, description });
+  });
+
+  app.put("/api/projects/:id/scenarios/:file/yaml", async (req, rep) => {
+    const { id, file } = req.params as { id: string; file: string };
+    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+    const b = req.body as { content?: string };
+    const content = b.content ?? "";
+    let doc: unknown;
+    try {
+      doc = parseYaml(content);
+    } catch (e) {
+      return rep.code(400).send(fail(`YAML 解析失败: ${e instanceof Error ? e.message : String(e)}`, 400));
+    }
+    const parsed = parseScenario(doc);
+    if (!parsed.ok) return rep.code(400).send(fail(parsed.issues.join("\n"), 400));
+    await writeFile(path.join(scenariosDir, id, file), content, "utf8");
+    return ok({ saved: true });
+  });
+
+  app.put("/api/projects/:id/scenarios/:file/description", async (req, rep) => {
+    const { id, file } = req.params as { id: string; file: string };
+    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+    const b = req.body as { content?: string };
+    await writeFile(path.join(scenariosDir, id, file.replace(/\.ya?ml$/, ".md")), b.content ?? "", "utf8");
+    return ok({ saved: true });
+  });
+
+  app.post("/api/projects/:id/scenarios/:file/ai-generate", async (req, rep) => {
+    const { id, file } = req.params as { id: string; file: string };
+    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+    const b = req.body as { description?: string } | null;
+    const filePath = path.join(scenariosDir, id, file);
+    let currentYaml = "";
+    try {
+      currentYaml = await readFile(filePath, "utf8");
+    } catch {
+      /* 新场景可以从零生成 */
+    }
+    let description = b?.description ?? "";
+    if (description.trim() === "") {
+      try {
+        description = await readFile(filePath.replace(/\.ya?ml$/, ".md"), "utf8");
+      } catch {
+        /* 描述可为空 */
+      }
+    }
+    const project = getProject(store, id);
+    if (project === null) return rep.code(404).send(fail("project not found", 404));
+    const aiEnv = resolveAiEnv(store, varSnapshot(store, id).values);
+    const cfg = aiConfigFrom(aiEnv);
+    const r = await generateScenarioYaml(cfg, description, currentYaml);
+    if (!r.ok) return rep.code(502).send(fail(r.error, 502));
+    return ok({ yaml: r.yaml, ms: r.ms });
   });
 
   // ---- global AI (Midscene/GLM) settings ----

@@ -100,6 +100,72 @@ export async function testAi(
   }
 }
 
+export interface ChatResult {
+  ok: boolean;
+  text: string;
+  ms: number;
+}
+
+/** 通用补全：双协议（anthropic 端点走 /v1/messages，其余走 OpenAI /chat/completions）。 */
+export async function chatCompletion(
+  cfg: AiConfig,
+  system: string,
+  user: string,
+  opts: { maxTokens?: number; fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+): Promise<ChatResult> {
+  const missing = [
+    cfg.model === "" && "模型名",
+    cfg.baseUrl === "" && "Base URL",
+    cfg.apiKey === "" && "API Key",
+  ].filter((x): x is string => typeof x === "string");
+  if (missing.length > 0) return { ok: false, text: "AI 配置不完整：缺 " + missing.join("、"), ms: 0 };
+
+  const anthropic = isAnthropicProtocol(cfg);
+  const base = cfg.baseUrl.replace(/\/+$/, "");
+  const url = anthropic ? base + "/v1/messages" : base + "/chat/completions";
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  let payload: unknown;
+  if (anthropic) {
+    headers["x-api-key"] = cfg.apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+    payload = {
+      model: cfg.model,
+      max_tokens: opts.maxTokens ?? 16_000,
+      system,
+      messages: [{ role: "user", content: user }],
+    };
+  } else {
+    headers.authorization = "Bearer " + cfg.apiKey;
+    payload = {
+      model: cfg.model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0,
+      max_tokens: opts.maxTokens ?? 16_000,
+    };
+  }
+  const started = Date.now();
+  try {
+    const res = await (opts.fetchImpl ?? fetch)(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 180_000),
+    });
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!res.ok) {
+      const detail = JSON.stringify(body)?.slice(0, 300) ?? "";
+      return { ok: false, text: `HTTP ${res.status} ${detail}`, ms: Date.now() - started };
+    }
+    const text = anthropic ? anthropicReply(body) : openaiReply(body);
+    return { ok: true, text, ms: Date.now() - started };
+  } catch (e) {
+    return { ok: false, text: e instanceof Error ? e.message : String(e), ms: Date.now() - started };
+  }
+}
+
 function openaiReply(body: Record<string, unknown> | null): string {
   const choices = body?.choices as { message?: { content?: unknown } }[] | undefined;
   return String(choices?.[0]?.message?.content ?? "").trim();
