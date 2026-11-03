@@ -116,6 +116,10 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .flow figcaption b{margin-right:6px;font-size:13px}
 .shot{aspect-ratio:16/10;max-width:100%;background:repeating-linear-gradient(45deg,var(--stripe-a),var(--stripe-a) 10px,var(--stripe-b) 10px,var(--stripe-b) 20px);border:1px solid var(--line);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--mut);font:12px var(--f-mono)}
 .att{font:12px var(--f-mono);margin-top:4px}
+#modal{position:fixed;inset:0;background:rgba(10,14,22,.55);display:flex;align-items:flex-start;justify-content:center;z-index:60;padding-top:10vh}
+#modal[hidden]{display:none}
+.modal-card{background:var(--card);border:1px solid var(--line);border-radius:10px;max-width:560px;width:92vw;max-height:82vh;overflow:auto;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.modal-x{position:absolute;top:14px;right:16px;font-size:22px;background:none;border:0;cursor:pointer;color:var(--mut)}
 #lb{position:fixed;inset:0;background:rgba(10,14,22,.86);display:flex;align-items:center;justify-content:center;z-index:50}
 #lb[hidden]{display:none}
 #lb figure{margin:0;max-width:92vw;display:flex;flex-direction:column}
@@ -188,8 +192,7 @@ async function viewHome() {
   var allRuns = await api('/api/runs?limit=6').catch(function () { return []; });
   var ai = CACHE.ai = await api('/api/ai').catch(function () { return null; });
   var h = '<header class="top"><div class="brand">Test<span>Forge</span></div><span class="mut">Data Forge · 场景驱动的 AI 测试平台</span></header><div class="home">';
-  h += '<div class="row"><h2>项目</h2><div style="display:flex;gap:8px"><button onclick="go({aiForm:!S.aiForm})">AI 配置' + (ai && ai.configured ? ' ✓' : '') + '</button><button class="pri" onclick="go({creating:true})">新建项目</button></div></div>';
-  if (S.aiForm && ai) h += aiFormHtml(ai);
+  h += '<div class="row"><h2>项目</h2><div style="display:flex;gap:8px"><button onclick="openAiModal()">AI 配置' + (ai && ai.configured ? ' ✓' : '') + '</button><button class="pri" onclick="go({creating:true})">新建项目</button></div></div>';
   if (S.creating) h += newProjectForm();
   h += '<div class="pgrid">';
   for (var p of projects) {
@@ -207,19 +210,31 @@ async function viewHome() {
   }
   return h + '</table></div></div>';
 }
+/* ---------- AI 配置弹窗 ---------- */
+var aiModal = document.createElement('div');
+aiModal.id = 'modal'; aiModal.hidden = true;
+aiModal.addEventListener('click', function (e) { if (e.target === aiModal) closeAiModal(); });
+document.body.appendChild(aiModal);
+function openAiModal() {
+  api('/api/ai').then(function (ai) {
+    CACHE.ai = ai;
+    aiModal.innerHTML = '<div class="modal-card" style="position:relative"><button class="modal-x" title="关闭" onclick="closeAiModal()">×</button>' + aiFormHtml(ai) + '</div>';
+    aiModal.hidden = false;
+  }).catch(function (e) { window.alert('读取 AI 配置失败：' + e.message); });
+}
+function closeAiModal() { aiModal.hidden = true; }
 function aiFormHtml(ai) {
-  return '<div class="card form" style="max-width:640px"><b>AI 配置（全局，Midscene / GLM）</b>'
-    + '<div class="mut">ai_action 和视觉断言共用这份配置；项目变量里的 MIDSCENE_* 可以按项目覆盖。</div>'
+  return '<div class="form"><b>AI 配置（全局，Midscene / GLM）</b>'
+    + '<div class="mut">ai_action、视觉断言与场景工作台的 AI 生成共用这份配置；项目变量里的 MIDSCENE_* 可以按项目覆盖。</div>'
     + '<div class="fgrid">'
     + '<label>模型族<input id="ai-family" value="' + esc(ai.family || 'anthropic') + '"></label>'
     + '<label>模型名<input id="ai-model" placeholder="glm-5.3" value="' + esc(ai.model) + '"></label>'
     + '<label>Base URL<input id="ai-baseurl" placeholder="https://open.bigmodel.cn/api/anthropic" value="' + esc(ai.baseUrl) + '"></label>'
-    + '<label>API Key（' + (ai.hasApiKey ? '已配置，留空保持不变' : '未配置') + '）<input id="ai-key" type="password" placeholder="sk-…"></label>'
+    + '<label>API Key（' + (ai.hasApiKey ? '已配置，留空保持不变' : '未配置') + '）<input id="ai-key" type="password" placeholder="粘贴智谱 API Key"></label>'
     + '</div>'
     + '<div id="ai-result" class="mut"></div>'
     + '<div class="row" style="justify-content:flex-start;margin:0"><button class="pri" onclick="saveAi(false)">保存</button>'
-    + '<button onclick="saveAi(true)">保存并测试连接</button>'
-    + '<button onclick="go({aiForm:false})">收起</button></div></div>';
+    + '<button onclick="saveAi(true)">保存并测试连接</button></div></div>';
 }
 async function saveAi(test) {
   var v = function (i) { return document.getElementById(i).value.trim(); };
@@ -228,7 +243,7 @@ async function saveAi(test) {
   if (key !== '') body.apiKey = key;
   try {
     CACHE.ai = await api('/api/ai', j('PUT', body));
-    if (!test) { go({ aiForm: false }); return; }
+    if (!test) { closeAiModal(); render(); return; }
     document.getElementById('ai-result').textContent = '测试中…（最多等 20 秒）';
     var r = await api('/api/ai/test', { method: 'POST' });
     document.getElementById('ai-result').innerHTML = r.ok
@@ -331,7 +346,8 @@ async function tabWorkbench(p) {
   h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
     + '<button onclick="saveScnDesc(this)">保存描述</button>'
     + '<button onclick="aiGenYaml(this)">AI 生成 / 优化 YAML</button>'
-    + '<span class="mut">AI 会读取左侧描述和当前 YAML，返回新版 YAML 到下方，确认后再保存</span></div>';
+    + '<button title="配置 GLM 模型与 API Key" onclick="openAiModal()">⚙ AI 配置' + (CACHE.ai && CACHE.ai.configured ? ' ✓' : '') + '</button>'
+    + '<span class="mut">AI 会读取描述和当前 YAML，返回新版 YAML 到下方，确认后再保存</span></div>';
   h += '<div id="scn-ai-status" class="scn-status"></div>';
   h += '<h3 style="margin-top:18px">YAML 配置</h3>';
   h += '<textarea id="scn-yaml" class="scn-ta" spellcheck="false">' + esc(src.yaml) + '</textarea>';
@@ -582,6 +598,7 @@ lb.id = 'lb'; lb.hidden = true;
 lb.addEventListener('click', function (e) { if (e.target === lb) closeLb(); });
 document.body.appendChild(lb);
 document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && !aiModal.hidden) { closeAiModal(); return; }
   if (lb.hidden) return;
   if (e.key === 'Escape') closeLb();
   else if (e.key === 'ArrowLeft') lbGo(-1);
