@@ -137,7 +137,7 @@ describe("runner e2e", () => {
     expect(r.status, JSON.stringify(r.steps.map((x) => [x.stepId, x.status, x.error.slice(0, 150)]))).toBe("passed");
   });
 
-  it("failing fail-level step fails the run; warn-level does not", async () => {
+  it("failing fail-level step fails the run; warn-level does not", { timeout: 60000 }, async () => {
     const s = makeScenario();
     const parsed = parseScenario({
       name: "失败路径",
@@ -232,5 +232,123 @@ document.getElementById("city").value = "";
     expect(r.status, JSON.stringify(r.steps.map((x) => [x.stepId, x.status, x.error.slice(0, 150)]))).toBe("passed");
     const downloads = await readdir(path.join(r.dir, "downloads"));
     expect(downloads.some((f) => f.startsWith("hotels_") && f.endsWith(".csv"))).toBe(true);
+  });
+});
+
+describe("runner flow 环节步骤", () => {
+  it("环节收敛子步骤：1 步出 1 图、断言逐条保留、子步骤记录进 summary", { timeout: 60000 }, async () => {
+    server.close();
+    await new Promise<void>((ok) => {
+      server = http.createServer((req, res) => {
+        if (req.url === "/add" && req.method === "POST") {
+          res.writeHead(200, { "content-type": "text/html" });
+          res.end(`<!doctype html><html><body>
+<div class="row" id="row-E2E酒店">E2E酒店</div>
+<div id="count">1</div>
+</body></html>`);
+          return;
+        }
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end(`<!doctype html><html><head><meta charset="utf-8"><title>flow demo</title></head><body>
+<form onsubmit="event.preventDefault();fetch('/add',{method:'POST'}).then(r=>r.text()).then(h=>{document.open();document.write(h);document.close();})">
+<input id="name" value="E2E酒店"><button id="save" type="submit">保存</button>
+</form>
+</body></html>`);
+      });
+      server.listen(0, "127.0.0.1", ok);
+    });
+    const addr = server.address();
+    if (addr === null || typeof addr === "string") throw new Error("no port");
+    const base3 = `http://127.0.0.1:${addr.port}`;
+
+    const parsed = parseScenario({
+      name: "环节验证",
+      baseUrl: base3,
+      actors: { user: {} },
+      steps: [
+        {
+          type: "flow",
+          id: "新增酒店环节",
+          expect: "提交表单后列表出现新酒店",
+          steps: [
+            { type: "navigate", url: "/" },
+            { type: "fill", selector: "#name", value: "E2E酒店" },
+            { type: "click", selector: "#save", waitFor: "#row-E2E酒店" },
+            { type: "extract", selector: "#count", into: "cnt" },
+            { type: "js_assert", script: "document.querySelectorAll('.row').length", equals: 1 },
+            { type: "js_assert", script: "document.getElementById('count').textContent", equals: "${var:cnt}" },
+          ],
+        },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.issues.join(";"));
+    const r = await runScenario({ store, dataDir, projectId: "demo", scenario: parsed.scenario, triggeredBy: "vitest" });
+    if ("reason" in r) throw new Error(r.reason);
+    expect(r.status, JSON.stringify(r.steps.map((x) => [x.stepId, x.status, x.error.slice(0, 150)]))).toBe("passed");
+    // 场景只有 1 个顶层步骤
+    expect(r.steps.length).toBe(1);
+    const flow = r.steps[0]!;
+    expect(flow.type).toBe("flow");
+    // 子步骤全记录（navigate/fill/click/extract/js_assert×2）
+    expect(flow.subSteps?.length).toBe(6);
+    expect(flow.subSteps?.every((s) => s.status === "passed")).toBe(true);
+    // 子步骤断言逐条保留在环节断言里（js_assert 的 ${var:cnt} 插值生效 → equals "1"）
+    expect(flow.assertions.filter((a) => a.type === "js_assert").length).toBe(2);
+    // 只拍 1 张环节截图（子步骤的 after 截图被抑制）
+    const shots = await readdir(path.join(r.dir, "screenshots"));
+    expect(shots.length).toBe(1);
+    expect(shots[0]).toContain("新增酒店环节");
+    // summary.json 里也有 subSteps
+    const summary = JSON.parse(await readFile(path.join(r.dir, "summary.json"), "utf8"));
+    expect(summary.steps[0].subSteps.length).toBe(6);
+  });
+
+  it("环节内子步骤失败 → 环节失败并留失败补拍", { timeout: 60000 }, async () => {
+    const parsed = parseScenario({
+      name: "环节失败验证",
+      baseUrl: base,
+      actors: { user: {} },
+      steps: [
+        {
+          type: "flow",
+          id: "失败环节",
+          steps: [
+            { type: "navigate", url: "/" },
+            { type: "dom_assert", selector: "#not-exist", state: "visible" },
+            { type: "dom_assert", selector: "#btn", state: "visible" },
+          ],
+        },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.issues.join(";"));
+    // base 服务可能已被上一个用例换掉，重建一个最简页面服务
+    server.close();
+    await new Promise<void>((ok) => {
+      server = http.createServer((req, res) => {
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end("<!doctype html><html><body><button id=\"btn\">go</button></body></html>");
+      });
+      server.listen(0, "127.0.0.1", ok);
+    });
+    const addr = server.address();
+    if (addr === null || typeof addr === "string") throw new Error("no port");
+    const base4 = `http://127.0.0.1:${addr.port}`;
+    const parsed2 = parseScenario({
+      name: "环节失败验证",
+      baseUrl: base4,
+      actors: { user: {} },
+      steps: parsed.scenario.steps,
+    });
+    if (!parsed2.ok) throw new Error(parsed2.issues.join(";"));
+    const r = await runScenario({ store, dataDir, projectId: "demo", scenario: parsed2.scenario, triggeredBy: "vitest" });
+    if ("reason" in r) throw new Error(r.reason);
+    expect(r.status).toBe("failed");
+    const flow = r.steps[0]!;
+    expect(flow.status).toBe("failed");
+    expect(flow.subSteps?.[1]?.status).toBe("failed");
+    expect(flow.subSteps?.[2]?.status).toBe("passed"); // 失败后继续跑后面的子步骤
+    expect(flow.error).toContain("#not-exist");
+    const shots = await readdir(path.join(r.dir, "screenshots"));
+    expect(shots.some((f) => f.includes("fail"))).toBe(true);
   });
 });

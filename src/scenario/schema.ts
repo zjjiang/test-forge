@@ -69,7 +69,7 @@ const stepCommon = {
   when: z.string().min(1).optional(),
 };
 
-const stepSchema = z.discriminatedUnion("type", [
+const atomicSteps = z.discriminatedUnion("type", [
   z.object({
     ...stepCommon,
     type: z.literal("navigate"),
@@ -211,6 +211,15 @@ const stepSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+const stepSchema = z.discriminatedUnion("type", [
+  ...atomicSteps.options,  z.object({
+    ...stepCommon,
+    type: z.literal("flow"),
+    /** 环节内原子子步骤（不能再嵌 flow），跑完拍一张环节截图 */
+    steps: z.array(atomicSteps).min(1).max(60),
+  }),
+]);
+
 export const actorSchema = z.object({
   description: z.string().max(200).optional(),
   /** 原生 confirm/alert 处理：accept 自动接受（停用店铺等），缺省 dismiss */
@@ -258,68 +267,48 @@ export const scenarioSchema = z
   })
   .superRefine((s, ctx) => {
     const actorKeys = new Set(Object.keys(s.actors));
-    const checkAs = (steps: z.infer<typeof stepSchema>[], where: string) => {
-      steps.forEach((st, i) => {
-        if (st.as !== undefined && !actorKeys.has(st.as)) {
-          ctx.addIssue({
-            code: "custom",
-            path: [where, i, "as"],
-            message: `未定义的 actor「${st.as}」`,
-          });
-        }
-      });
-    };
-    checkAs(s.steps, "steps");
-    checkAs(s.teardown ?? [], "teardown");
-    // wait 的跨字段校验放在这里，保证 discriminated union 的分支都是纯 object
-    const checkWait = (steps: z.infer<typeof stepSchema>[], where: string) => {
-      steps.forEach((st, i) => {
-        if (
-          st.type === "wait" &&
-          st.ms === undefined &&
-          st.selector === undefined
-        ) {
-          ctx.addIssue({
-            code: "custom",
-            path: [where, i],
-            message: "wait 需要 ms 或 selector 之一",
-          });
-        }
-      });
-    };
-    checkWait(s.steps, "steps");
-    checkWait(s.teardown ?? [], "teardown");
-    // select 需要 value 或 label；js_assert 需要至少一种期望；extract 需要 as
-    const checkSteps = (
-      steps: z.infer<typeof stepSchema>[],
-      where: string,
-      rule: (st: z.infer<typeof stepSchema>) => string | null,
-    ) => {
-      steps.forEach((st, i) => {
-        const msg = rule(st);
-        if (msg !== null) ctx.addIssue({ code: "custom", path: [where, i], message: msg });
-      });
-    };
-    const rules = [
-      (st: z.infer<typeof stepSchema>): string | null =>
-        st.type === "select" && st.value === undefined && st.label === undefined
-          ? "select 需要 value 或 label 之一"
-          : null,
-      (st: z.infer<typeof stepSchema>): string | null =>
-        st.type === "extract" && st.into === undefined
-          ? "extract 需要 into（写入的变量名）"
-          : null,
-      (st: z.infer<typeof stepSchema>): string | null =>
+    type StepLike = z.infer<typeof stepSchema>;
+    /** 展开一层：顶层步骤 + flow 的子步骤，给出各自的 path 前缀 */
+    const expand = (steps: StepLike[], where: string): [StepLike, string][] =>
+      steps.flatMap((st, i) =>
+        st.type === "flow"
+          ? [[st, `${where}.${i}`] as [StepLike, string], ...st.steps.map((sub, j) => [sub, `${where}.${i}.steps.${j}`] as [StepLike, string])]
+          : [[st, `${where}.${i}`] as [StepLike, string]],
+      );
+    const allSteps: [StepLike, string][] = [
+      ...expand(s.steps, "steps"),
+      ...expand(s.teardown ?? [], "teardown"),
+    ];
+    for (const [st, where] of allSteps) {
+      const seg = where.split(".").map((x) => (/^\d+$/.test(x) ? Number(x) : x));
+      if (st.as !== undefined && !actorKeys.has(st.as)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [...seg, "as"],
+          message: `未定义的 actor「${st.as}」`,
+        });
+      }
+      if (st.type === "wait" && st.ms === undefined && st.selector === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: seg,
+          message: "wait 需要 ms 或 selector 之一",
+        });
+      }
+      if (st.type === "select" && st.value === undefined && st.label === undefined) {
+        ctx.addIssue({ code: "custom", path: seg, message: "select 需要 value 或 label 之一" });
+      }
+      if (st.type === "extract" && st.into === undefined) {
+        ctx.addIssue({ code: "custom", path: seg, message: "extract 需要 into（写入的变量名）" });
+      }
+      if (
         st.type === "js_assert" &&
         st.equals === undefined &&
         st.contains === undefined &&
         st.truthy === undefined
-          ? "js_assert 需要 equals / contains / truthy 之一"
-          : null,
-    ];
-    for (const rule of rules) {
-      checkSteps(s.steps, "steps", rule);
-      checkSteps(s.teardown ?? [], "teardown", rule);
+      ) {
+        ctx.addIssue({ code: "custom", path: seg, message: "js_assert 需要 equals / contains / truthy 之一" });
+      }
     }
   });
 

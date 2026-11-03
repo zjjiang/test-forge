@@ -30,6 +30,18 @@ export interface StepResult {
   assertions: AssertionRecord[];
   error: string;
   shots: string[];
+  /** type=flow 时：环节内子步骤记录 */
+  subSteps?: SubStepResult[];
+}
+
+/** flow 环节内子步骤的执行记录（进 summary，供报告折叠展示） */
+export interface SubStepResult {
+  stepId: string;
+  type: string;
+  status: StepStatus;
+  error: string;
+  ms: number;
+  assertions: AssertionRecord[];
 }
 
 export type RunStatus = "passed" | "failed" | "needs_review" | "skipped";

@@ -114,3 +114,76 @@ describe("scenarioSchema", () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe("flow 环节步骤校验", () => {
+  const base = {
+    name: "flow 校验",
+    actors: { user: {} },
+  };
+
+  it("合法 flow 通过，子步骤规则同样生效", () => {
+    const ok = parseScenario({
+      ...base,
+      steps: [
+        {
+          type: "flow",
+          id: "环节一",
+          steps: [
+            { type: "navigate", url: "/" },
+            { type: "js_assert", script: "true", truthy: true },
+          ],
+        },
+      ],
+    });
+    expect(ok.ok).toBe(true);
+  });
+
+  it("flow 不能嵌 flow", () => {
+    const bad = parseScenario({
+      ...base,
+      steps: [
+        {
+          type: "flow",
+          steps: [{ type: "flow", steps: [{ type: "navigate", url: "/" }] }],
+        } as never,
+      ],
+    });
+    expect(bad.ok).toBe(false);
+  });
+
+  it("flow 子步骤缺 select 的 value/label 时报错", () => {
+    const bad = parseScenario({
+      ...base,
+      steps: [
+        {
+          type: "flow",
+          steps: [{ type: "select", selector: "#s" }],
+        },
+      ],
+    });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.issues.join(";")).toContain("select 需要");
+  });
+
+  it("flow 子步骤引用未定义 actor 报错", () => {
+    const bad = parseScenario({
+      ...base,
+      steps: [
+        {
+          type: "flow",
+          steps: [{ type: "navigate", url: "/", as: "ghost" }],
+        },
+      ],
+    });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.issues.join(";")).toContain("ghost");
+  });
+
+  it("flow 至少要有一个子步骤", () => {
+    const bad = parseScenario({
+      ...base,
+      steps: [{ type: "flow", steps: [] }],
+    });
+    expect(bad.ok).toBe(false);
+  });
+});

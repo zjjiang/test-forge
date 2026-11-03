@@ -368,13 +368,22 @@ async function viewRun() {
       + bad.map(function (st) { return '<b>' + esc(st.stepId) + '</b>' + (st.error ? '（' + esc(st.error.slice(0, 90)) + '）' : ''); }).join('；')
       + '</div>';
   }
-  /* 大步骤 = 有截图的关键节点；之间的小步骤默认折叠，点开查看 */
-  function smallRows(arr) {
-    return arr.map(function (it) {
-      var st = it.st;
-      return '<div class="srow"><b>' + (it.si + 1) + '. ' + esc(st.stepId) + '</b>' + badge(st.status)
+  /* 大步骤 = 有截图的关键节点；小步骤（无截图步骤 / flow 子步骤）默认折叠，点开查看 */
+  function rows(items) {
+    return items.map(function (it, n) {
+      var st = it.st || it;
+      var num = it.si !== undefined ? (it.si + 1) + '. ' : (n + 1) + '. ';
+      return '<div class="srow"><b>' + num + esc(st.stepId) + '</b>' + badge(st.status)
         + (st.expect && st.expect !== st.stepId ? '<span class="mut">' + esc(st.expect) + '</span>' : '')
-        + '<span class="mut">' + (st.ms || 0) + 'ms · 无截图</span></div>';
+        + (st.error ? '<span class="mut">' + esc(st.error.slice(0, 80)) + '</span>' : '')
+        + '<span class="mut">' + (st.ms || 0) + 'ms' + (it.st ? ' · 无截图' : '') + '</span></div>';
+    }).join('');
+  }
+  function flowSubRows(st) {
+    return (st.subSteps || []).map(function (s, n) {
+      return '<div class="srow"><b>' + (n + 1) + '. ' + esc(s.stepId) + '</b>' + badge(s.status)
+        + (s.error ? '<span class="mut">' + esc(s.error.slice(0, 80)) + '</span>' : '')
+        + '<span class="mut">' + (s.ms || 0) + 'ms</span></div>';
     }).join('');
   }
   var groups = [], pending = [];
@@ -384,7 +393,7 @@ async function viewRun() {
   });
   h += '<div class="flow">';
   if (!steps.length) h += '<span class="mut">（本次执行没有步骤）</span>';
-  if (!groups.length) h += '<div class="srow">' + smallRows(pending) + '</div>';
+  if (!groups.length) h += '<div class="srow">' + rows(pending) + '</div>';
   groups.forEach(function (g) {
     var cap = '<b>' + (g.si + 1) + '. ' + esc(g.st.stepId) + '</b>' + badge(g.st.status)
       + (g.st.expect && g.st.expect !== g.st.stepId ? '<span class="mut">' + esc(g.st.expect) + '</span>' : '');
@@ -394,12 +403,15 @@ async function viewRun() {
       S.shots.push({ src: base + f, caption: label + ' · ' + f });
       h += '<figure><img src="' + base + esc(f) + '" loading="lazy" style="max-width:100%;cursor:zoom-in" onclick="lbOpen(' + idx + ')" title="点击放大">'
         + '<figcaption>' + cap + '<div class="mut">' + esc(f) + '</div>'
-        + (g.small.length ? '<details class="small"><summary>展开 ' + g.small.length + ' 个小步骤</summary>' + smallRows(g.small) + '</details>' : '')
+        + (g.small.length || (g.st.subSteps || []).length
+          ? '<details class="small"><summary>展开 ' + (g.small.length + (g.st.subSteps || []).length) + ' 个小步骤</summary>'
+            + rows(g.small) + flowSubRows(g.st) + '</details>'
+          : '')
         + '</figcaption></figure>';
     });
   });
   if (groups.length && pending.length) {
-    h += '<figure><figcaption><details class="small" open><summary>其后 ' + pending.length + ' 个小步骤（收尾等）</summary>' + smallRows(pending) + '</details></figcaption></figure>';
+    h += '<figure><figcaption><details class="small" open><summary>其后 ' + pending.length + ' 个小步骤（收尾等）</summary>' + rows(pending) + '</details></figcaption></figure>';
   }
   h += '</div>';
   return { side: side({ name: run.scenarioName, baseUrl: '' }, {}), body: h };

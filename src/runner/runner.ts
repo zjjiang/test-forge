@@ -195,7 +195,11 @@ export async function runScenario(
       const stepShots: string[] = [];
       let inst: Step;
       try {
-        inst = interpolateDeep(step, stepVars()) as Step;
+        /* flow 的子步骤顶层不插值：extract 写入的运行时变量此刻还不存在，
+           子步骤在 flow 执行时逐个用 stepVars() 重新插值 */
+        inst = step.type === "flow"
+          ? ({ ...(interpolateDeep({ ...step, steps: [] }, stepVars()) as Step), steps: step.steps } as Step)
+          : (interpolateDeep(step, stepVars()) as Step);
       } catch (e) {
         // 变量缺失等插值失败按普通失败步骤处理，不中断整个 run
         stepResults.push(
@@ -221,6 +225,7 @@ export async function runScenario(
           runtimeVars = { ...runtimeVars, [name]: value };
         },
         downloadPath: (suggested) => evidence.filePath("downloads", suggested),
+        stepVars: stepVars,
       });
       const status: StepStatus = result.skipped === true
         ? "skipped"
@@ -241,7 +246,18 @@ export async function runScenario(
         assertions: result.assertions,
         error: result.ok ? "" : result.error,
         shots: stepShots,
+        ...(result.subSteps !== undefined ? { subSteps: result.subSteps } : {}),
       });
+      if (result.subSteps !== undefined) {
+        for (const sub of result.subSteps) {
+          if (sub.status === "warned") {
+            warnings.push({
+              where: `step ${i + 1} (${step.id ?? step.type}) › ${sub.stepId}`,
+              message: sub.error || "子步骤未通过",
+            });
+          }
+        }
+      }
       if (!result.ok && step.onFail === "warn")
         warnings.push({
           where: `step ${i + 1} (${step.id ?? step.type})`,

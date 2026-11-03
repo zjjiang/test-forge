@@ -1,8 +1,9 @@
 /// <reference lib="dom" />
 import type { Locator, Page } from "playwright";
 import type { Step } from "../scenario/schema.js";
+import { interpolateDeep } from "../scenario/interpolate.js";
 import type { NetworkEntry, ActorRuntime } from "./env.js";
-import type { AssertionRecord, AttemptRecord } from "./types.js";
+import type { AssertionRecord, AttemptRecord, StepStatus, SubStepResult } from "./types.js";
 
 export interface AIDriver {
   act(instruction: string, page: Page): Promise<void>;
@@ -20,6 +21,8 @@ export interface StepCtx {
   setVar: (name: string, value: string) => void;
   /** download 步骤的落盘位置（证据目录 downloads/ 下） */
   downloadPath: (suggestedName: string) => string;
+  /** 当前变量快照（flow 子步骤执行时逐个重新插值用），可缺省 */
+  stepVars?: () => Record<string, unknown>;
 }
 
 export interface StepOutcome {
@@ -29,6 +32,8 @@ export interface StepOutcome {
   error: string;
   attempts: AttemptRecord[];
   assertions: AssertionRecord[];
+  /** type=flow 时：子步骤记录 */
+  subSteps?: SubStepResult[];
 }
 
 function nowIso(): string {
@@ -311,6 +316,64 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
             await page.waitForTimeout(500);
           }
         }
+        case "flow": {
+          /* 环节：原子子步骤逐个跑；子步骤只留失败补拍，环节结束拍一张总结截图 */
+          const subs: SubStepResult[] = [];
+          const subCtx: StepCtx = {
+            ...ctx,
+            shot: async (label, phase) => {
+              if (phase === "fail") await ctx.shot(label, "fail");
+            },
+          };
+          let allOk = true;
+          let firstError = "";
+          for (let j = 0; j < step.steps.length; j++) {
+            const raw: Step = step.steps[j]!;
+            let inst: Step = raw;
+            let preError = "";
+            if (ctx.stepVars !== undefined) {
+              try {
+                inst = interpolateDeep(raw, ctx.stepVars()) as Step;
+              } catch (e) {
+                preError = e instanceof Error ? e.message : String(e);
+              }
+            }
+            const subId = raw.id ?? `${raw.type}-${j + 1}`;
+            if (preError !== "") {
+              subs.push({ stepId: subId, type: raw.type, status: raw.onFail === "warn" ? "warned" : "failed", error: preError, ms: 0, assertions: [] });
+              if (raw.onFail === "warn") continue;
+              allOk = false;
+              if (firstError === "") firstError = `${subId}: ${preError}`;
+              continue;
+            }
+            const r = await executeStep(inst, subCtx);
+            const subStatus: StepStatus = r.skipped === true
+              ? "skipped"
+              : r.ok
+                ? "passed"
+                : raw.onFail === "warn"
+                  ? "warned"
+                  : "failed";
+            subs.push({
+              stepId: subId,
+              type: raw.type,
+              status: subStatus,
+              error: r.ok ? "" : r.error,
+              ms: r.attempts.reduce((s, a) => s + a.ms, 0),
+              assertions: r.assertions,
+            });
+            out.assertions.push(...r.assertions);
+            if (subStatus === "failed") {
+              allOk = false;
+              if (firstError === "") firstError = `${subId}: ${r.error}`;
+            }
+          }
+          if (allOk) await ctx.shot(step.id ?? step.type, "after");
+          record(out, step, "det", `环节共 ${step.steps.length} 个子步骤`, allOk ? "全部通过" : `存在失败：${firstError}`, allOk);
+          out.error = allOk ? "" : firstError;
+          out.subSteps = subs;
+          return allOk;
+        }
         case "download": {
           const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs(step, ctx) });
           downloadPromise.catch(() => {
@@ -352,6 +415,12 @@ export async function executeStep(step: Step, ctx: StepCtx): Promise<StepOutcome
   const last = out.attempts.at(-1);
   if (last !== undefined && !last.ok) {
     out.ok = false;
+    if (out.error === "") {
+      const bad = out.assertions.filter((a) => !a.ok).at(-1);
+      out.error = bad !== undefined
+        ? `${bad.expectedText} → ${bad.actualText}`
+        : "步骤未通过";
+    }
     await ctx.shot(step.id ?? step.type, "fail");
   }
   ctx.log(`STEP ${step.id ?? step.type} ${out.ok ? "ok" : "fail"} (${Date.now() - t0}ms)`);
