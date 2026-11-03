@@ -96,6 +96,14 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .flow > .srow{grid-column:1/-1;font-size:12px;display:flex;gap:8px;align-items:baseline;border-bottom:1px dashed var(--line);padding:3px 2px}
 .flow .srow .mut{margin-left:auto;white-space:nowrap}
 .flow .srow b{white-space:nowrap}
+.scn-md{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.scn-md .scn-ta{min-height:260px}
+.md-body{font-size:13px;line-height:1.7;border:1px solid var(--line);border-radius:6px;background:var(--th,#f8f9fb);padding:12px 16px;min-height:260px;overflow-wrap:anywhere}
+.md-body h1,.md-body h2,.md-body h3{margin:.6em 0 .3em;font-size:14px}
+.md-body blockquote{margin:.4em 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--mut,#5d6679)}
+.md-body ol,.md-body ul{margin:.3em 0;padding-left:1.4em}
+.md-body code{font-family:var(--f-mono);font-size:12px;background:var(--code,#eef0f4);padding:1px 4px;border-radius:3px}
+@media (max-width:900px){.scn-md{grid-template-columns:1fr}}
 .scn-ta{width:100%;min-height:170px;font-family:var(--f-mono);font-size:12.5px;line-height:1.55;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);box-sizing:border-box;resize:vertical}
 #scn-yaml{min-height:440px}
 .scn-status{font-size:12px;margin-top:6px;min-height:16px}
@@ -145,6 +153,7 @@ td .b{display:inline-block}
 .app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 </style></head><body>
 <div class="app" id="app"><aside id="side" hidden></aside><main id="main"></main></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
 <script>
 /* API 层：全部走 Fastify，统一信封 {success,data,error} */
 async function api(path, opts) {
@@ -308,13 +317,17 @@ async function tabWorkbench(p) {
   } catch (e) {
     return '<div class="card"><button onclick="backScn()">← 返回列表</button><div class="err" style="margin-top:10px">' + esc(e.message) + '</div></div>';
   }
+  setTimeout(renderDescPreview, 0);
   var h = '<div class="card">';
   h += '<div class="row" style="justify-content:flex-start"><button onclick="backScn()">← 返回列表</button><b style="margin-left:8px">' + esc(S.scn) + '</b>'
     + '<span style="margin-left:auto"></span>'
     + '<button onclick="runScn(this)">▶ 运行本场景</button></div>';
   h += '<h3 style="margin-top:16px">业务描述</h3>';
   h += '<div class="mut" style="margin-bottom:6px">用业务语言写：这个场景测什么、分哪些环节、每个环节验收什么。AI 会按这里的描述生成/优化 YAML，描述是源头。</div>';
+  h += '<div class="scn-md">';
   h += '<textarea id="scn-desc" class="scn-ta" placeholder="例：覆盖店铺配置页的主流程与权限边界：\n1. 管理员登录，新增 E2E 店铺，flash 提示已创建\n2. 编辑店铺填写信科凭证，ID 明文回显、Cookie 掩码\n3. 停用/再启用状态翻转\n4. 非 admin 只能看本店、写接口 403\n5. 收尾停用 E2E 店留档">' + esc(src.description) + '</textarea>';
+  h += '<div class="md-body" id="scn-desc-preview"></div>';
+  h += '</div>';
   h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
     + '<button onclick="saveScnDesc(this)">保存描述</button>'
     + '<button onclick="aiGenYaml(this)">AI 生成 / 优化 YAML</button>'
@@ -328,6 +341,16 @@ async function tabWorkbench(p) {
   h += '<div id="scn-yaml-status" class="scn-status"></div>';
   return h + '</div>';
 }
+function renderDescPreview() {
+  var el = document.getElementById('scn-desc-preview');
+  var ta = document.getElementById('scn-desc');
+  if (el === null || ta === null) return;
+  var mdText = ta.value;
+  el.innerHTML = (window.marked && mdText.trim() !== '') ? window.marked.parse(mdText, { breaks: true }) : '<span class="mut">（预览：左边输入 Markdown，这里实时渲染）</span>';
+}
+document.addEventListener('input', function (e) {
+  if (e.target && e.target.id === 'scn-desc') renderDescPreview();
+});
 async function saveScnDesc(btn) {
   var old = btn.textContent;
   btn.disabled = true; btn.textContent = '保存中…';
