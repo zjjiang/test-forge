@@ -320,8 +320,10 @@ async function tabScenarios(p, counts) {
     var last = s.lastRun;
     h += '<tr><td><a title="打开场景工作台：' + esc(s.file) + '" onclick="openScn(\'' + esc(s.file) + '\')"><b>' + esc(s.name) + '</b></a></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
       + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
-      + '<td>' + (last ? '<button title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">报告</button> ' : '')
-      + '<button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button></td></tr>';
+      + '<td><button title="打开场景工作台：描述 + YAML + AI 优化" onclick="openScn(\'' + esc(s.file) + '\')">配置</button> '
+      + '<button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button> '
+      + (last ? '<button title="查看这次执行：' + esc(last.id) + '" onclick="openRun(\'' + esc(p.id) + '\',\'' + esc(last.id) + '\')">报告</button>' : '')
+      + '</td></tr>';
   });
   h += '</table></div>';
   h += '<h3>执行记录</h3><div class="card"><table><tr><th>Run ID</th><th>场景</th><th>状态</th><th>耗时</th><th>触发</th><th>时间</th></tr>';
