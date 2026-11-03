@@ -106,3 +106,45 @@ export async function generateScenarioYaml(
   if (yaml === "") return { ok: false, yaml: "", ms: r.ms, error: "模型返回为空" };
   return { ok: true, yaml, ms: r.ms, error: "" };
 }
+
+const DESC_DOC = `你是测试平台的业务描述助手。用户会给你一段场景的业务描述（Markdown），请把它优化成结构清晰、可直接指导 YAML 生成的版本：
+
+结构模板：
+# 场景名 业务描述
+> 一句话说明场景目标
+
+## 环节
+1. **环节名**：动作概括；验收点（做什么、断言什么）
+（列出全部环节，顺序合理）
+
+## 边界与数据规则
+- 测试数据约定（E2E 前缀等）、已知缺陷取证点、权限边界等
+
+规则：
+- 不发明用户没写的业务逻辑，不删除用户已有的检查点，只重排结构、补全表达、让验收点更具体
+- 保持中文，保持 Markdown`;
+
+export interface DescOutcome {
+  ok: boolean;
+  description: string;
+  ms: number;
+  error: string;
+}
+
+/** 优化业务描述（只改表达，不改业务内容）；返回 Markdown 文本。 */
+export async function optimizeScenarioDescription(
+  cfg: AiConfig,
+  description: string,
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 120_000,
+): Promise<DescOutcome> {
+  const r = await chatCompletion(cfg, DESC_DOC, `请优化下面的业务描述：\n\n${description}`, {
+    fetchImpl,
+    timeoutMs,
+    maxTokens: 8000,
+  });
+  if (!r.ok) return { ok: false, description: "", ms: r.ms, error: r.text };
+  const description2 = stripFences(r.text);
+  if (description2 === "") return { ok: false, description: "", ms: r.ms, error: "模型返回为空" };
+  return { ok: true, description: description2, ms: r.ms, error: "" };
+}

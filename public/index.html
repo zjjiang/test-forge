@@ -221,16 +221,19 @@ async function viewHome() {
 /* ---------- AI 配置弹窗 ---------- */
 var aiModal = document.createElement('div');
 aiModal.id = 'modal'; aiModal.hidden = true;
-aiModal.addEventListener('click', function (e) { if (e.target === aiModal) closeAiModal(); });
+aiModal.addEventListener('click', function (e) { if (e.target === aiModal) closeModal(); });
 document.body.appendChild(aiModal);
+function openModal(html) {
+  aiModal.innerHTML = '<div class="modal-card" style="position:relative"><button class="modal-x" title="关闭" onclick="closeModal()">×</button>' + html + '</div>';
+  aiModal.hidden = false;
+}
+function closeModal() { aiModal.hidden = true; }
 function openAiModal() {
   api('/api/ai').then(function (ai) {
     CACHE.ai = ai;
-    aiModal.innerHTML = '<div class="modal-card" style="position:relative"><button class="modal-x" title="关闭" onclick="closeAiModal()">×</button>' + aiFormHtml(ai) + '</div>';
-    aiModal.hidden = false;
+    openModal(aiFormHtml(ai));
   }).catch(function (e) { window.alert('读取 AI 配置失败：' + e.message); });
 }
-function closeAiModal() { aiModal.hidden = true; }
 function aiFormHtml(ai) {
   return '<div class="form"><b>AI 配置（全局，Midscene / GLM）</b>'
     + '<div class="mut">ai_action、视觉断言与场景工作台的 AI 生成共用这份配置；项目变量里的 MIDSCENE_* 可以按项目覆盖。</div>'
@@ -251,7 +254,7 @@ async function saveAi(test) {
   if (key !== '') body.apiKey = key;
   try {
     CACHE.ai = await api('/api/ai', j('PUT', body));
-    if (!test) { closeAiModal(); render(); return; }
+    if (!test) { closeModal(); render(); return; }
     document.getElementById('ai-result').textContent = '测试中…（最多等 20 秒）';
     var r = await api('/api/ai/test', { method: 'POST' });
     document.getElementById('ai-result').innerHTML = r.ok
@@ -310,7 +313,7 @@ async function viewProject() {
 async function tabScenarios(p, counts) {
   if (S.scn !== null) return tabWorkbench(p);
   var items = CACHE.scenarios[S.p];
-  var h = '<div class="card"><div class="row"><b>场景</b><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引；改动后刷新本页。</span></div><table><tr><th>场景</th><th>角色</th><th>步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
+  var h = '<div class="card"><div class="row"><b>场景</b><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引。</span><span style="margin-left:auto"></span><button onclick="openNewScnModal()">＋ 新建场景</button></div><table><tr><th>场景</th><th>角色</th><th>步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
   if (!items.length) h += '<tr><td colspan="6" class="empty">还没有场景。在 scenarios/' + esc(p.id) + '/ 下放 YAML，或让 Claude Code 按需求生成。</td></tr>';
   items.forEach(function (s) {
     if (!s.valid) {
@@ -340,14 +343,19 @@ function backScn() { go({ view: 'project', p: S.p, tab: 'scenarios', scn: null }
 async function tabWorkbench(p) {
   destroyScnEditor();
   var src;
+  var curName = '';
   try {
     src = await api('/api/projects/' + p.id + '/scenarios/' + encodeURIComponent(S.scn) + '/source');
   } catch (e) {
     return '<div class="card"><button onclick="backScn()">← 返回列表</button><div class="err" style="margin-top:10px">' + esc(e.message) + '</div></div>';
   }
+  var nm = /^name:\s*(.+)$/m.exec(src.yaml);
+  curName = nm ? nm[1].trim() : '';
   setTimeout(function () { initScnEditor(src.description); }, 0);
   var h = '<div class="card">';
   h += '<div class="row" style="justify-content:flex-start"><button onclick="backScn()">← 返回列表</button><b style="margin-left:8px">' + esc(S.scn) + '</b>'
+    + '<input id="scn-name" value="' + esc(curName) + '" title="场景名（显示名，改完点「改名」）" style="width:180px;margin-left:8px">'
+    + '<button onclick="renameScn(this)">改名</button>'
     + '<span style="margin-left:auto"></span>'
     + '<button onclick="runScn(this)">▶ 运行本场景</button></div>';
   h += '<h3 style="margin-top:16px">业务描述</h3>';
@@ -355,8 +363,9 @@ async function tabWorkbench(p) {
   h += '<div class="scn-mdwrap"><textarea id="scn-desc"></textarea></div>';
   h += '<div class="row" style="justify-content:flex-start;margin-top:8px">'
     + '<button onclick="saveScnDesc(this)">保存描述</button>'
+    + '<button onclick="aiOptDesc(this)">AI 优化描述</button>'
     + '<button onclick="aiGenYaml(this)">AI 生成 / 优化 YAML</button>'
-    + '<span class="mut">AI 会读取描述和当前 YAML，返回新版 YAML 到下方，确认后再保存</span></div>';
+    + '<span class="mut">流程：写描述 → AI 优化描述 → 确认保存 → AI 生成 YAML → 校验保存</span></div>';
   h += '<div id="scn-ai-status" class="scn-status"></div>';
   h += '<h3 style="margin-top:18px">YAML 配置</h3>';
   h += '<textarea id="scn-yaml" class="scn-ta" spellcheck="false">' + esc(src.yaml) + '</textarea>';
@@ -444,6 +453,71 @@ async function saveScnYaml(btn) {
 }
 async function runScn(btn) {
   await triggerRun(S.p, S.scn, btn);
+}
+/* ---------- 新建场景 ---------- */
+function openNewScnModal() {
+  var items = CACHE.scenarios[S.p] || [];
+  var n = String(items.length + 1).padStart(2, '0');
+  openModal('<div class="form"><b>新建场景</b>'
+    + '<div class="fgrid">'
+    + '<label>场景名<input id="ns-name" placeholder="例：登录走查" oninput="suggestScnFile()"></label>'
+    + '<label>文件名（scenarios/' + esc(S.p) + '/ 下，中文即可）<input id="ns-file" value="' + n + '-新场景.yaml"></label>'
+    + '</div>'
+    + '<div id="ns-err" class="mut" style="margin-bottom:8px">创建后自动打开工作台：先写业务描述，再 AI 生成 YAML。</div>'
+    + '<div class="row" style="justify-content:flex-start;margin:0"><button class="pri" onclick="createScenario()">创建并打开工作台</button></div></div>');
+}
+function suggestScnFile() {
+  var name = document.getElementById('ns-name').value.trim();
+  if (name === '') return;
+  var items = CACHE.scenarios[S.p] || [];
+  var n = String(items.length + 1).padStart(2, '0');
+  document.getElementById('ns-file').value = n + '-' + name + '.yaml';
+}
+async function createScenario() {
+  var errEl = document.getElementById('ns-err');
+  var name = document.getElementById('ns-name').value.trim();
+  var file = document.getElementById('ns-file').value.trim();
+  if (name === '') { errEl.textContent = '请填场景名'; return; }
+  if (file === '') { errEl.textContent = '请填文件名'; return; }
+  if (!/\.ya?ml$/.test(file)) file += '.yaml';
+  try {
+    var r = await api('/api/projects/' + S.p + '/scenarios', j('POST', { name: name, file: file }));
+    closeModal();
+    CACHE.scenarios[S.p] = null;
+    openScn(r.file);
+  } catch (e) { errEl.textContent = '创建失败：' + e.message; }
+}
+/* ---------- 工作台：改名 + AI 优化描述 ---------- */
+async function renameScn(btn) {
+  var st = document.getElementById('scn-yaml-status');
+  var v = document.getElementById('scn-name').value.trim();
+  if (v === '') { st.textContent = '场景名不能为空'; return; }
+  var y = document.getElementById('scn-yaml').value;
+  if (!/^name:/m.test(y)) { st.textContent = 'YAML 里没有 name 字段'; return; }
+  var old = btn.textContent;
+  btn.disabled = true; btn.textContent = '保存中…';
+  try {
+    var y2 = y.replace(/^name:\s*.*$/m, 'name: ' + v);
+    await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/yaml', j('PUT', { content: y2 }));
+    document.getElementById('scn-yaml').value = y2;
+    CACHE.scenarios[S.p] = null;
+    st.textContent = '✅ 场景名已改为「' + v + '」（历史记录仍按旧名保留）';
+  } catch (e) { st.textContent = '改名失败：' + e.message; }
+  btn.disabled = false; btn.textContent = old;
+}
+async function aiOptDesc(btn) {
+  var st = document.getElementById('scn-ai-status');
+  var desc = scnDescValue();
+  if (desc.trim() === '') { st.textContent = '描述为空，先写点业务内容'; return; }
+  var old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'AI 优化中…';
+  st.textContent = '';
+  try {
+    var r = await api('/api/projects/' + S.p + '/scenarios/' + encodeURIComponent(S.scn) + '/optimize-description', j('POST', { description: desc }));
+    if (scnMde !== null) scnMde.value(r.description);
+    st.textContent = 'AI 已优化描述（耗时 ' + fmtMs(r.ms) + '）。确认内容后记得「保存描述」，再「AI 生成 / 优化 YAML」。';
+  } catch (e) { st.textContent = 'AI 优化失败：' + e.message; }
+  btn.disabled = false; btn.textContent = old;
 }
 
 async function tabVars(p, counts) {
@@ -607,7 +681,7 @@ lb.id = 'lb'; lb.hidden = true;
 lb.addEventListener('click', function (e) { if (e.target === lb) closeLb(); });
 document.body.appendChild(lb);
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape' && !aiModal.hidden) { closeAiModal(); return; }
+  if (e.key === 'Escape' && !aiModal.hidden) { closeModal(); return; }
   if (lb.hidden) return;
   if (e.key === 'Escape') closeLb();
   else if (e.key === 'ArrowLeft') lbGo(-1);

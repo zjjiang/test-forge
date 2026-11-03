@@ -25,7 +25,7 @@ import { parseScenario } from "../scenario/schema.js";
 import { parse as parseYaml } from "yaml";
 import { writeFile, readFile } from "node:fs/promises";
 import { aiConfigFrom, resolveAiEnv } from "../ai/glm.js";
-import { generateScenarioYaml } from "../ai/scenario-gen.js";
+import { generateScenarioYaml, optimizeScenarioDescription } from "../ai/scenario-gen.js";
 import { runScenario, type SkipInfo } from "../runner/runner.js";
 import type { RunResult } from "../runner/types.js";
 
@@ -253,6 +253,36 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
     const b = req.body as { content?: string };
     await writeFile(path.join(scenariosDir, id, file.replace(/\.ya?ml$/, ".md")), b.content ?? "", "utf8");
     return ok({ saved: true });
+  });
+
+  app.post("/api/projects/:id/scenarios", async (req, rep) => {
+    const id = (req.params as { id: string }).id;
+    if (getProject(store, id) === null) return rep.code(404).send(fail("project not found", 404));
+    const b = req.body as { name?: string; file?: string };
+    const name = (b.name ?? "").trim();
+    const file = (b.file ?? "").trim();
+    if (name === "") return rep.code(400).send(fail("缺少场景名", 400));
+    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file 必须是不带路径的 .yaml 文件名", 400));
+    const filePath = path.join(scenariosDir, id, file);
+    if (fs.existsSync(filePath)) return rep.code(400).send(fail("同名场景文件已存在", 400));
+    const skeleton = `# ${name}（新场景骨架：在描述里写清环节后用 AI 生成，或直接编辑）\nname: ${name}\ndescription: 待补充\nversion: 1\nactors:\n  user:\n    description: 默认角色\nsteps:\n  - id: 占位环节\n    type: flow\n    expect: 请通过 AI 生成或直接编辑本场景\n    steps:\n      - id: 打开首页\n        as: user\n        type: navigate\n        url: /\n`;
+    const parsed = parseScenario(parseYaml(skeleton));
+    if (!parsed.ok) return rep.code(500).send(fail("骨架校验失败: " + parsed.issues.join("; "), 500));
+    await writeFile(filePath, skeleton, "utf8");
+    return rep.code(201).send(ok({ file, created: true }));
+  });
+
+  app.post("/api/projects/:id/scenarios/:file/optimize-description", async (req, rep) => {
+    const { id, file } = req.params as { id: string; file: string };
+    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+    const b = req.body as { description?: string } | null;
+    const description = (b?.description ?? "").trim();
+    if (description === "") return rep.code(400).send(fail("描述为空，先写点业务内容再优化", 400));
+    if (getProject(store, id) === null) return rep.code(404).send(fail("project not found", 404));
+    const aiEnv = resolveAiEnv(store, varSnapshot(store, id).values);
+    const r = await optimizeScenarioDescription(aiConfigFrom(aiEnv), description);
+    if (!r.ok) return rep.code(502).send(fail(r.error, 502));
+    return ok({ description: r.description, ms: r.ms });
   });
 
   app.post("/api/projects/:id/scenarios/:file/ai-generate", async (req, rep) => {
