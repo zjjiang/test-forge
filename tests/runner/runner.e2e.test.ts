@@ -532,6 +532,53 @@ describe("runner flow 环节步骤", () => {
   );
 
   it(
+    "upload 步骤：填文件输入并提交表单", { timeout: 60000 }, async () => {
+      server.close();
+      await new Promise<void>((ok) => {
+        server = http.createServer((req, res) => {
+          if (req.url === "/import" && req.method === "POST") {
+            let n = 0;
+            req.on("data", (c: Buffer) => { n += c.length; });
+            req.on("end", () => {
+              res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+              // 有 body 即文件已随表单上传
+              res.end(`<!doctype html><html><body><div id="done">${n > 0 ? "导入完成" : "空文件"}</div></body></html>`);
+            });
+            return;
+          }
+          res.writeHead(200, { "content-type": "text/html" });
+          res.end(`<!doctype html><html><body>
+<form method="post" action="/import" enctype="multipart/form-data">
+<input type="file" name="file"><button id="go" type="submit">提交</button>
+</form></body></html>`);
+        });
+        server.listen(0, "127.0.0.1", ok);
+      });
+      const addr = server.address();
+      if (addr === null || typeof addr === "string") throw new Error("no port");
+      const base6 = `http://127.0.0.1:${addr.port}`;
+      const xlsx = path.join(scratch, "batch.xlsx");
+      await (await import("node:fs/promises")).writeFile(
+        xlsx, Buffer.from("PK\x03\x04 fake-xlsx-bytes-for-upload-test"));
+      const parsed = parseScenario({
+        name: "上传验证",
+        baseUrl: base6,
+        actors: { user: {} },
+        steps: [
+          { type: "navigate", url: "/" },
+          { type: "upload", selector: 'input[type="file"]', path: xlsx },
+          { type: "click", selector: "#go", waitFor: "#done" },
+          { type: "js_assert", script: 'document.getElementById("done").textContent', contains: "导入完成" },
+        ],
+      });
+      if (!parsed.ok) throw new Error(parsed.issues.join(";"));
+      const r = await runScenario({ store, dataDir, projectId: "demo", scenario: parsed.scenario, triggeredBy: "vitest" });
+      if ("reason" in r) throw new Error(r.reason);
+      expect(r.status, JSON.stringify(r.steps.map((x) => [x.stepId, x.status, x.error.slice(0, 150)]))).toBe("passed");
+    },
+  );
+
+  it(
     "flow 子步骤按 as 切换 actor 上下文（多身份隔离回归）",
     { timeout: 60000 },
     async () => {

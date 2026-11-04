@@ -159,6 +159,15 @@ const atomicSteps = z.discriminatedUnion("type", [
   }),
   z.object({
     ...stepCommon,
+    type: z.literal("upload"),
+    selector: z.string().min(1),
+    /** 本地文件绝对路径（支持 ${var:NAME} 指向项目变量里的数据文件） */
+    path: z.string().min(1),
+    /** 上传后等待出现的选择器（提交后的落地元素） */
+    waitFor: z.string().min(1).optional(),
+  }),
+  z.object({
+    ...stepCommon,
     type: z.literal("extract"),
     selector: z.string().min(1),
     /** 取属性值；缺省取 innerText */

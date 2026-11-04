@@ -374,6 +374,20 @@ export async function executeStep(
             await ctx.shot(step.id ?? step.type, "after");
           return true;
         }
+        case "upload": {
+          await page.setInputFiles(step.selector, step.path, {
+            timeout: ctx.stepTimeoutMs,
+          });
+          if (step.waitFor !== undefined)
+            await page.waitForSelector(step.waitFor, {
+              timeout: timeoutMs(step, ctx),
+              state: "visible",
+            });
+          record(out, step, "det", `上传 ${step.path}`, "uploaded", true);
+          if (step.waitFor !== undefined)
+            await ctx.shot(step.id ?? step.type, "after");
+          return true;
+        }
         case "hover": {
           await page.hover(step.selector, { timeout: ctx.stepTimeoutMs });
           if (step.waitFor !== undefined)

@@ -1,0 +1,216 @@
+# 场景四：批量导入 Excel + 任务进度页验证
+# 数据管理：Excel 是外部文件，路径放项目变量 IMPORT_XLSX（本地 data 包，换文件=换数据）；
+#          10 行确定性数据（E2E-批量01..10 / E2E-BATCH-001..010），重跑走 upsert 不堆积
+# 链路：店侧 /hotels 批量操作弹窗上传 → flash 任务已创建 → /tasks 页等任务跑完（10/10）→ 列表恰 10 行
+name: 批量导入Excel与任务进度
+description: 对应用户场景 4；验证批量上传 10 家酒店的后台任务链路与任务界面
+version: 1
+trace: false
+requires:
+  env: [IMPORT_XLSX]
+variables:
+  shopName: "E2E-批量-${var:RUN_STAMP}"
+  shopUser: "e2ebat_${var:RUN_DATE}${var:RUN_TIME}"
+actors:
+  admin:
+    description: 管理员
+    dialogs: accept
+  shop:
+    description: E2E 测试店铺身份
+    dialogs: accept
+steps:
+  - id: 管理员登录并新增E2E店
+    type: flow
+    expect: admin 登录成功并创建 E2E 测试店
+    steps:
+      - id: admin打开登录页
+        as: admin
+        type: navigate
+        url: /login
+      - id: admin填写账号
+        as: admin
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:ADMIN_USER}
+      - id: admin填写密码
+        as: admin
+        type: fill
+        selector: 'input[name="password"]'
+        value: ${var:ADMIN_PW}
+      - id: admin提交登录
+        as: admin
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: admin登录成功
+        as: admin
+        type: wait
+        selector: '.topbar .usermenu'
+      - id: 打开店铺配置页
+        as: admin
+        type: navigate
+        url: /settings/shop
+      - id: 等店铺列表加载
+        as: admin
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击增加店铺
+        as: admin
+        type: click
+        selector: '#btn-add-shop'
+        waitFor: '#adddlg[open]'
+      - id: 填写店铺名
+        as: admin
+        type: fill
+        selector: '#adddlg input[name="name"]'
+        value: ${var:shopName}
+      - id: 填写店铺账号
+        as: admin
+        type: fill
+        selector: '#adddlg input[name="username"]'
+        value: ${var:shopUser}
+      - id: 保存新店
+        as: admin
+        type: click
+        selector: '#adddlg button.btn'
+      - id: E2E店创建成功
+        as: admin
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已创建
+  - id: 店侧基线登录
+    type: flow
+    expect: E2E 店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 批量弹窗上传Excel
+    type: flow
+    expect: 批量操作弹窗上传 IMPORT_XLSX（10 行），提交后提示任务已创建
+    steps:
+      - id: 打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击批量操作
+        as: shop
+        type: click
+        selector: '#btn-import'
+        waitFor: '#batchdlg[open]'
+        expect: 打开批量操作弹窗
+      - id: 上传Excel文件
+        as: shop
+        type: upload
+        selector: '#batchform input[type="file"]'
+        path: ${var:IMPORT_XLSX}
+        expect: 选择本地 Excel 数据文件（IMPORT_XLSX）
+      - id: 提交导入
+        as: shop
+        type: click
+        selector: '#batchform button[type="submit"]'
+      - id: flash提示任务已创建
+        as: shop
+        type: js_assert
+        script: '(document.querySelector(".content .flash") || { textContent: "" }).textContent'
+        contains: 任务已创建
+        expect: 任务已创建（含任务号与行数）
+      - id: 提示共10行
+        as: shop
+        type: js_assert
+        script: '(document.querySelector(".content .flash") || { textContent: "" }).textContent'
+        contains: 共 10 行
+        expect: 解析出全部 10 行
+  - id: 任务进度页验证
+    type: flow
+    expect: /tasks 页出现本店「酒店导入」任务并轮询到「已完成 10/10」
+    steps:
+      - id: 打开任务进度页
+        as: shop
+        type: navigate
+        url: /tasks
+      - id: 等任务表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 导入任务已完成10行
+        as: shop
+        type: js_assert
+        script: '(() => { return Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("酒店导入") && tr.textContent.includes("已完成") && tr.textContent.includes("10/10")); })()'
+        truthy: true
+        expect: 任务状态翻转为已完成且完成数 10/10（后台执行中会轮询等待）
+      - id: 环节结束帧=任务页
+        as: shop
+        type: js_assert
+        script: 'document.querySelectorAll(".tbl tbody tr").length >= 1'
+        truthy: true
+        expect: 任务列表有记录
+  - id: 列表验证10家酒店
+    type: flow
+    expect: 酒店列表出现 E2E-批量01..10 共 10 行
+    steps:
+      - id: 回到酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载2
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: KPI在营10家
+        as: shop
+        type: js_assert
+        script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("10"); })()'
+        truthy: true
+        expect: 在营酒店 KPI 为 10
+      - id: 批量行恰好10条
+        as: shop
+        type: js_assert
+        script: '(() => { return Array.from(document.querySelectorAll(".tbl tbody tr")).filter((tr) => tr.textContent.includes("E2E-批量")).length === 10; })()'
+        truthy: true
+        expect: E2E-批量 酒店恰 10 行（重跑 upsert 不堆积）
+teardown:
+  - id: 收尾停用E2E店留档
+    type: flow
+    expect: E2E 店若仍在营则停用留档
+    steps:
+      - id: 收尾等登录完成
+        as: admin
+        type: wait
+        selector: '.topbar .usermenu'
+      - id: 收尾打开店铺配置页
+        as: admin
+        type: navigate
+        url: /settings/shop
+      - id: 收尾等列表加载
+        as: admin
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 停用E2E店留档（仅当仍在营）
+        as: admin
+        type: click
+        selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+        when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
+        onFail: warn
