@@ -179,7 +179,38 @@ async function api(path, opts) {
 const j = (method, data) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
 
 var S = { view: 'home', p: null, tab: 'scenarios', run: null, reveal: {}, edit: null, filter: null, creating: false, poll: null, scn: null, scnTab: 'desc' };
-function go(o) { Object.assign(S, o); if (S.poll) { clearInterval(S.poll); S.poll = null; } if (typeof lb !== 'undefined' && !lb.hidden) closeLb(); render(); }
+function go(o) { Object.assign(S, o); if (S.poll) { clearInterval(S.poll); S.poll = null; } if (typeof lb !== 'undefined' && !lb.hidden) closeLb(); syncHash(); render(); }
+
+/* ---------- hash 路由：支持直达链接（#/p/htinns/run/<id> 等） ---------- */
+var lastHash = null;
+function buildHash() {
+  if (S.view === 'run' && S.p && S.run) return '#/p/' + encodeURIComponent(S.p) + '/run/' + encodeURIComponent(S.run);
+  if (S.view === 'project' && S.p) return '#/p/' + encodeURIComponent(S.p) + (S.scn ? '/scn/' + encodeURIComponent(S.scn) : '');
+  return '#/';
+}
+function syncHash() {
+  var h = buildHash();
+  if (h !== location.hash) { lastHash = h; location.hash = h; }
+}
+function applyHash() {
+  var h = decodeURIComponent(location.hash || '#/');
+  var m;
+  if ((m = /^#\/p\/([^/]+)\/run\/(.+)$/.exec(h))) {
+    Object.assign(S, { view: 'run', p: m[1], run: m[2], scn: null, scnTab: 'desc' });
+  } else if ((m = /^#\/p\/([^/]+)\/scn\/(.+)$/.exec(h))) {
+    Object.assign(S, { view: 'project', p: m[1], tab: 'scenarios', scn: m[2], scnTab: 'desc' });
+  } else if ((m = /^#\/p\/([^/]+)$/.exec(h))) {
+    Object.assign(S, { view: 'project', p: m[1], tab: 'scenarios', scn: null });
+  } else {
+    Object.assign(S, { view: 'home', p: null, run: null, scn: null });
+  }
+  render();
+}
+window.addEventListener('hashchange', function () {
+  if (location.hash === lastHash) return;
+  lastHash = location.hash;
+  applyHash();
+});
 
 var CACHE = { projects: null, project: {}, vars: {}, scenarios: {}, runs: {}, run: {} };
 function badge(s) { var m = { passed: '通过', failed: '失败', needs_review: '待人工复核', skipped: '跳过', running: '执行中' }; return '<span class="b ' + s + '">' + (m[s] || s) + '</span>'; }
@@ -740,5 +771,6 @@ function drawLb() {
 }
 
 window.addEventListener('beforeunload', function () { if (S.poll) clearInterval(S.poll); });
-render();
+lastHash = location.hash;
+applyHash();
 </script></body></html>
