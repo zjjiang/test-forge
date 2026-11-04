@@ -1,0 +1,265 @@
+# 场景三：酒店管理——新增单个酒店（信科同步回填）
+# 主线：建 E2E 店并配信科凭证（XK_COOKIE / 平台ID 499，与凭证账号配对）→ 店侧登录 →
+#       弹窗新增酒店（名称取环境变量 HOTEL_NAME，信科平台真实在线酒店）→
+#       点信科同步 → 断言字段回填 → 保存
+# 重复性：源码是 upsert 语义（同店+同SHID/同名 → 更新既有记录），
+#         故第二次保存应提示「已更新既有酒店」且列表行数仍为 1，不产生重复行
+name: 酒店新增与信科同步
+description: 对应用户场景 3；验证新增酒店弹窗的信科同步回填与 upsert 幂等
+version: 1
+trace: false
+requires:
+  env: [XK_COOKIE, HOTEL_NAME]
+variables:
+  shopName: "E2E-酒店-${var:RUN_STAMP}"
+  shopUser: "e2ehtl_${var:RUN_DATE}${var:RUN_TIME}"
+actors:
+  admin:
+    description: 管理员
+    dialogs: accept
+  shop:
+    description: E2E 测试店铺身份
+    dialogs: accept
+steps:
+  - id: 管理员登录并新增E2E店
+    type: flow
+    expect: admin 登录成功并创建 E2E 测试店
+    steps:
+      - id: admin打开登录页
+        as: admin
+        type: navigate
+        url: /login
+      - id: admin填写账号
+        as: admin
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:ADMIN_USER}
+      - id: admin填写密码
+        as: admin
+        type: fill
+        selector: 'input[name="password"]'
+        value: ${var:ADMIN_PW}
+      - id: admin提交登录
+        as: admin
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: admin登录成功
+        as: admin
+        type: wait
+        selector: '.topbar .usermenu'
+      - id: 打开店铺配置页
+        as: admin
+        type: navigate
+        url: /settings/shop
+      - id: 等店铺列表加载
+        as: admin
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击增加店铺
+        as: admin
+        type: click
+        selector: '#btn-add-shop'
+        waitFor: '#adddlg[open]'
+      - id: 填写店铺名
+        as: admin
+        type: fill
+        selector: '#adddlg input[name="name"]'
+        value: ${var:shopName}
+      - id: 填写店铺账号
+        as: admin
+        type: fill
+        selector: '#adddlg input[name="username"]'
+        value: ${var:shopUser}
+      - id: 保存新店
+        as: admin
+        type: click
+        selector: '#adddlg button.btn'
+      - id: E2E店创建成功
+        as: admin
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已创建
+  - id: 店侧基线登录
+    type: flow
+    expect: E2E 店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 店侧配置信科凭证
+    type: flow
+    expect: 本店信科平台ID（499，与凭证账号配对）与Cookie（环境变量 XK_COOKIE）保存成功
+    steps:
+      - id: 打开店铺配置页
+        as: shop
+        type: navigate
+        url: /settings/shop
+      - id: 等本店行加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 打开本店编辑弹窗
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-edit'
+        waitFor: '#editdlg[open]'
+      - id: 填写信科店铺ID
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_shop_id"]'
+        value: "499"
+      - id: 填写真实Cookie
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_cookie"]'
+        value: ${var:XK_COOKIE}
+      - id: 保存凭证
+        as: shop
+        type: click
+        selector: '#editdlg button.btn'
+      - id: flash提示已保存
+        as: shop
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已保存
+  - id: 新增酒店并信科同步
+    type: flow
+    expect: 名称取 HOTEL_NAME，点信科同步后字段回填，保存后列表新增且恰 1 行
+    steps:
+      - id: 打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击新增酒店
+        as: shop
+        type: click
+        selector: '#btn-new'
+        waitFor: '#hoteldlg[open]'
+      - id: 填写测试酒店名
+        as: shop
+        type: fill
+        selector: '#hotelform input[name="hotel_name"]'
+        value: ${var:HOTEL_NAME}
+      - id: 点击信科同步
+        as: shop
+        type: click
+        selector: '#btn-xinke'
+      - id: 同步成功提示出现
+        as: shop
+        type: js_assert
+        script: 'document.getElementById("sync-msg").textContent'
+        contains: 信科同步成功
+        expect: 信科同步成功，记得保存
+      - id: 同步字段已回填
+        as: shop
+        type: js_assert
+        script: '(() => { const f = (n) => (document.querySelector("#hotelform input[name=" + JSON.stringify(n) + "]") || { value: "" }).value.trim(); return f("supplier_hotel_id") !== "" && f("supplier") !== "" && f("city_name") !== ""; })()'
+        truthy: true
+        expect: 供应商酒店ID/供应商/城市已自动回填
+      - id: 飞猪映射已补全
+        as: shop
+        type: js_assert
+        script: '(() => { const f = (n) => (document.querySelector("#hotelform input[name=" + JSON.stringify(n) + "]") || { value: "" }).value.trim(); return f("fliggy_shid") !== "" && f("fliggy_hid") !== ""; })()'
+        truthy: true
+        expect: 飞猪 SHID/HID 经平台映射补全（shopid=499 配对正确时应非空）
+      - id: 点击保存
+        as: shop
+        type: click
+        selector: '#hotelform button[type="submit"]'
+      - id: flash提示已新增酒店
+        as: shop
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已新增酒店
+        expect: 保存成功提示已新增
+      - id: 列表恰有1行该酒店
+        as: shop
+        type: js_assert
+        script: '(() => { const name = "${var:HOTEL_NAME}"; return Array.from(document.querySelectorAll(".tbl tbody tr")).filter((tr) => tr.textContent.includes(name)).length === 1; })()'
+        truthy: true
+        expect: 列表出现该酒店且仅 1 行
+  - id: 重复添加走upsert更新
+    type: flow
+    expect: 同名再添加不报错不产生重复行，保存提示「已更新既有酒店」
+    steps:
+      - id: 再次点击新增酒店
+        as: shop
+        type: click
+        selector: '#btn-new'
+        waitFor: '#hoteldlg[open]'
+      - id: 再次填写同名
+        as: shop
+        type: fill
+        selector: '#hotelform input[name="hotel_name"]'
+        value: ${var:HOTEL_NAME}
+      - id: 再次点击信科同步
+        as: shop
+        type: click
+        selector: '#btn-xinke'
+      - id: 二次同步成功提示
+        as: shop
+        type: js_assert
+        script: 'document.getElementById("sync-msg").textContent'
+        contains: 信科同步成功
+      - id: 点击保存2
+        as: shop
+        type: click
+        selector: '#hotelform button[type="submit"]'
+      - id: flash提示已更新既有酒店
+        as: shop
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已更新既有酒店
+        expect: upsert 命中既有记录提示已更新
+      - id: 列表仍恰1行不重复
+        as: shop
+        type: js_assert
+        script: '(() => { const name = "${var:HOTEL_NAME}"; return Array.from(document.querySelectorAll(".tbl tbody tr")).filter((tr) => tr.textContent.includes(name)).length === 1; })()'
+        truthy: true
+        expect: 重复添加后仍只有 1 行（幂等）
+teardown:
+  - id: 收尾停用E2E店留档
+    type: flow
+    expect: E2E 店若仍在营则停用留档
+    steps:
+      - id: 收尾等登录完成
+        as: admin
+        type: wait
+        selector: '.topbar .usermenu'
+      - id: 收尾打开店铺配置页
+        as: admin
+        type: navigate
+        url: /settings/shop
+      - id: 收尾等列表加载
+        as: admin
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 停用E2E店留档（仅当仍在营）
+        as: admin
+        type: click
+        selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+        when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
+        onFail: warn
