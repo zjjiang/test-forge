@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "testforge": {
+      "command": "pnpm",
+      "args": ["--dir", "/Users/jiangzhijian/Projects/test-forge", "exec", "tsx", "src/mcp/index.ts"],
+      "env": {
+        "TESTFORGE_URL": "http://127.0.0.1:3300"
+      }
+    }
+  }
+}
