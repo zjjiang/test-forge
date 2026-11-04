@@ -100,7 +100,8 @@ export async function runScenario(
   const now = new Date();
   const pad2 = (n: number): string => String(n).padStart(2, "0");
   const mmdd = pad2(now.getMonth() + 1) + pad2(now.getDate());
-  const hms = pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds());
+  const hms =
+    pad2(now.getHours()) + pad2(now.getMinutes()) + pad2(now.getSeconds());
   const builtins: Record<string, string> = {
     RUN_DATE: `${now.getFullYear()}${mmdd}`,
     RUN_TIME: hms,
@@ -109,9 +110,16 @@ export async function runScenario(
   };
   // 场景变量可以引用内置变量/项目变量（如 shopName: "E2E-x-${var:RUN_STAMP}"），
   // 反复解析直到不再变化（最多 5 轮，防环）
-  let declared: Record<string, unknown> = { ...(opts.scenario.variables ?? {}) };
+  let declared: Record<string, unknown> = {
+    ...(opts.scenario.variables ?? {}),
+  };
   for (let round = 0; round < 5; round += 1) {
-    const next = interpolateDeep(declared, { ...builtins, ...snap.values, ...declared, ...(opts.varsOverride ?? {}) });
+    const next = interpolateDeep(declared, {
+      ...builtins,
+      ...snap.values,
+      ...declared,
+      ...(opts.varsOverride ?? {}),
+    });
     if (JSON.stringify(next) === JSON.stringify(declared)) break;
     declared = next as Record<string, unknown>;
   }
@@ -199,17 +207,32 @@ export async function runScenario(
       try {
         /* flow 的子步骤顶层不插值：extract 写入的运行时变量此刻还不存在，
            子步骤在 flow 执行时逐个用 stepVars() 重新插值 */
-        inst = step.type === "flow"
-          ? ({ ...(interpolateDeep({ ...step, steps: [] }, stepVars()) as Step), steps: step.steps } as Step)
-          : (interpolateDeep(step, stepVars()) as Step);
+        inst =
+          step.type === "flow"
+            ? ({
+                ...(interpolateDeep(
+                  { ...step, steps: [] },
+                  stepVars(),
+                ) as Step),
+                steps: step.steps,
+              } as Step)
+            : (interpolateDeep(step, stepVars()) as Step);
       } catch (e) {
         // 变量缺失等插值失败按普通失败步骤处理，不中断整个 run
         stepResults.push(
-          emptyStep(i, step, actorName, step.onFail === "warn" ? "warned" : "failed",
-            e instanceof Error ? e.message : String(e)),
+          emptyStep(
+            i,
+            step,
+            actorName,
+            step.onFail === "warn" ? "warned" : "failed",
+            e instanceof Error ? e.message : String(e),
+          ),
         );
         if (step.onFail === "warn")
-          warnings.push({ where: `step ${i + 1} (${step.id ?? step.type})`, message: e instanceof Error ? e.message : String(e) });
+          warnings.push({
+            where: `step ${i + 1} (${step.id ?? step.type})`,
+            message: e instanceof Error ? e.message : String(e),
+          });
         return;
       }
       const result = await executeStep(inst, {
@@ -218,24 +241,26 @@ export async function runScenario(
         stepTimeoutMs,
         ai,
         log,
-        shot: async (label, phase) => {
+        shot: async (label, phase, rt) => {
           const p = evidence.shotPath(label, phase);
-          await freezeAndShot(runtime.page, p);
+          await freezeAndShot((rt ?? runtime).page, p);
           stepShots.push(path.relative(evidence.dir, p));
         },
+        runtimeFor: (as) => runtimes.get(as ?? actorNames[0] ?? "") ?? runtime,
         setVar: (name, value) => {
           runtimeVars = { ...runtimeVars, [name]: value };
         },
         downloadPath: (suggested) => evidence.filePath("downloads", suggested),
         stepVars: stepVars,
       });
-      const status: StepStatus = result.skipped === true
-        ? "skipped"
-        : result.ok
-          ? "passed"
-          : step.onFail === "warn"
-            ? "warned"
-            : "failed";
+      const status: StepStatus =
+        result.skipped === true
+          ? "skipped"
+          : result.ok
+            ? "passed"
+            : step.onFail === "warn"
+              ? "warned"
+              : "failed";
       stepResults.push({
         index: i,
         stepId: step.id ?? `${step.type}-${i + 1}`,

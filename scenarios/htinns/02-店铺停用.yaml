@@ -1,0 +1,265 @@
+# 场景二：店铺停用/启用闭环（用户定义 2026-11-04）
+# 测试对象是本次新建的 E2E 店（绝不操作真实店，新乡旅途 shop_id=7 只读）：
+# 基线登录 → admin 停用 → 店侧新登录被拒 → admin 启用 → 店侧登录恢复 → 收尾停用留档
+# 源码口径：登录查询按 is_active=True 过滤，停用店登录与密码错误同样提示「用户名或密码错误」
+name: 店铺停用闭环
+description: 对应用户场景 2；验证店铺停用/启用开关对店侧登录的实际效力
+version: 1
+trace: false
+requires:
+  env: []
+variables:
+  shopName: "E2E-停用-${var:RUN_STAMP}"
+  shopUser: "e2etgl_${var:RUN_DATE}${var:RUN_TIME}"
+actors:
+  admin:
+    description: 管理员
+    dialogs: accept
+  shop:
+    description: E2E 测试店铺身份
+    dialogs: accept
+steps:
+  - id: 管理员登录并新增E2E店
+    type: flow
+    expect: admin 登录成功并创建 E2E 测试店
+    steps:
+      - id: admin打开登录页
+        as: admin
+        type: navigate
+        url: /login
+      - id: admin填写账号
+        as: admin
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:ADMIN_USER}
+      - id: admin填写密码
+        as: admin
+        type: fill
+        selector: 'input[name="password"]'
+        value: ${var:ADMIN_PW}
+      - id: admin提交登录
+        as: admin
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: admin登录成功
+        as: admin
+        type: wait
+        selector: '.topbar .usermenu'
+        expect: admin 登录成功
+      - id: 打开店铺配置页
+        as: admin
+        type: navigate
+        url: /settings/shop
+      - id: 等店铺列表加载
+        as: admin
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击增加店铺
+        as: admin
+        type: click
+        selector: '#btn-add-shop'
+        waitFor: '#adddlg[open]'
+      - id: 填写店铺名
+        as: admin
+        type: fill
+        selector: '#adddlg input[name="name"]'
+        value: ${var:shopName}
+      - id: 填写店铺账号
+        as: admin
+        type: fill
+        selector: '#adddlg input[name="username"]'
+        value: ${var:shopUser}
+      - id: 保存新店
+        as: admin
+        type: click
+        selector: '#adddlg button.btn'
+      - id: E2E店创建成功
+        as: admin
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已创建
+        expect: E2E 店创建成功
+  - id: 店侧基线登录
+    type: flow
+    expect: 停用前 E2E 店可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+        expect: 停用前登录成功（基线）
+  - id: admin停用店铺
+    type: flow
+    expect: 行内停用成功，状态翻转为「停用」
+    steps:
+      - id: admin回到店铺配置页
+        as: admin
+        type: navigate
+        url: /settings/shop
+      - id: 等列表加载
+        as: admin
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击停用
+        as: admin
+        type: click
+        selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+        when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
+        waitFor: '.content .flash'
+        expect: 行内点击停用
+      - id: flash提示已停用
+        as: admin
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已停用
+        expect: flash 提示已停用
+      - id: 行状态翻转为停用
+        as: admin
+        type: js_assert
+        script: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return row !== undefined && (row.querySelector(".pill") || { textContent: "" }).textContent.trim() === "停用"; })()'
+        truthy: true
+        expect: 行状态翻转为「停用」
+  - id: 停用后登录被拒
+    type: flow
+    expect: 停用店新登录失败，提示「用户名或密码错误」并留在登录页
+    steps:
+      - id: 店侧先登出清会话
+        as: shop
+        type: navigate
+        url: /logout
+      - id: 店铺账号打开登录页2
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名2
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码2
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录2
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 登录被拒提示
+        as: shop
+        type: dom_assert
+        selector: '.lflash.danger'
+        contains: 用户名或密码错误
+        expect: 停用店登录被拒
+      - id: 仍留在登录页
+        as: shop
+        type: js_assert
+        script: 'location.pathname'
+        contains: /login
+        expect: 仍留在登录页
+      - id: 顶栏未出现（未进入平台）
+        as: shop
+        type: js_assert
+        script: 'document.querySelector(".topbar .usermenu") === null'
+        truthy: true
+        expect: 未进入平台
+  - id: admin启用店铺
+    type: flow
+    expect: 行内启用成功，状态翻回「在营」
+    steps:
+      - id: admin回到店铺配置页2
+        as: admin
+        type: navigate
+        url: /settings/shop
+      - id: 等列表加载2
+        as: admin
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击启用
+        as: admin
+        type: click
+        selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+        when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "停用"; })()'
+        waitFor: '.content .flash'
+        expect: 行内点击启用
+      - id: flash提示已启用
+        as: admin
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已启用
+        expect: flash 提示已启用
+      - id: 行状态翻回在营
+        as: admin
+        type: js_assert
+        script: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return row !== undefined && (row.querySelector(".pill") || { textContent: "" }).textContent.trim() === "在营"; })()'
+        truthy: true
+        expect: 行状态翻回「在营」
+  - id: 启用后登录恢复
+    type: flow
+    expect: 重新启用后同一账号可正常登录
+    steps:
+      - id: 店铺账号打开登录页3
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名3
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码3
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录3
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 恢复登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+        expect: 启用后登录恢复
+teardown:
+  - id: 收尾停用E2E店留档
+    type: flow
+    expect: E2E 店若仍在营则停用留档
+    steps:
+      - id: 收尾等登录完成
+        as: admin
+        type: wait
+        selector: '.topbar .usermenu'
+      - id: 收尾打开店铺配置页
+        as: admin
+        type: navigate
+        url: /settings/shop
+      - id: 收尾等列表加载
+        as: admin
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 停用E2E店留档（仅当仍在营）
+        as: admin
+        type: click
+        selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
+        when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
+        onFail: warn
+        expect: 停用 E2E 店留档（仅当仍在营）
