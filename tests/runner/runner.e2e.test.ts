@@ -579,6 +579,44 @@ describe("runner flow 环节步骤", () => {
   );
 
   it(
+    "js_assert reload: 轮询时刷新页面以捕捉后端状态变化", { timeout: 60000 }, async () => {
+      let hits = 0;
+      server.close();
+      await new Promise<void>((ok) => {
+        server = http.createServer((req, res) => {
+          // 每次请求计数 +1：只有 reload 才能看到数字增长
+          if (req.url === "/count") {
+            hits += 1;
+            res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+            res.end(`<!doctype html><html><body><div id="n">${hits}</div></body></html>`);
+            return;
+          }
+          res.writeHead(200, { "content-type": "text/html" });
+          res.end("<!doctype html><html><body>home</body></html>");
+        });
+        server.listen(0, "127.0.0.1", ok);
+      });
+      const addr = server.address();
+      if (addr === null || typeof addr === "string") throw new Error("no port");
+      const base7 = `http://127.0.0.1:${addr.port}`;
+      const parsed = parseScenario({
+        name: "reload 轮询",
+        baseUrl: base7,
+        actors: { user: {} },
+        steps: [
+          { type: "navigate", url: "/count" },
+          { type: "js_assert", timeoutMs: 10000, reload: true,
+            script: 'document.getElementById("n").textContent', equals: "3" },
+        ],
+      });
+      if (!parsed.ok) throw new Error(parsed.issues.join(";"));
+      const r = await runScenario({ store, dataDir, projectId: "demo", scenario: parsed.scenario, triggeredBy: "vitest" });
+      if ("reason" in r) throw new Error(r.reason);
+      expect(r.status, JSON.stringify(r.steps.map((x) => [x.stepId, x.status, x.error.slice(0, 150)]))).toBe("passed");
+    },
+  );
+
+  it(
     "flow 子步骤按 as 切换 actor 上下文（多身份隔离回归）",
     { timeout: 60000 },
     async () => {

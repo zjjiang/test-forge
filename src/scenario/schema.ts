@@ -198,6 +198,8 @@ const atomicSteps = z.discriminatedUnion("type", [
     contains: z.string().optional(),
     /** 结果为真值即通过 */
     truthy: z.boolean().optional(),
+    /** 每次轮询前 reload 当前页：捕捉后端异步状态变化（任务页等静态页轮询） */
+    reload: z.boolean().optional(),
   }),
   z.object({
     ...stepCommon,

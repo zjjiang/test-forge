@@ -1,13 +1,14 @@
-# 场景四：批量导入 Excel + 任务进度页验证
-# 数据管理：Excel 是外部文件，路径放项目变量 IMPORT_XLSX（本地 data 包，换文件=换数据）；
-#          10 行确定性数据（E2E-批量01..10 / E2E-BATCH-001..010），重跑走 upsert 不堆积
-# 链路：店侧 /hotels 批量操作弹窗上传 → flash 任务已创建 → /tasks 页等任务跑完（10/10）→ 列表恰 10 行
+# 场景四：批量导入 Excel（真实酒店名 + 信科为准）+ 任务进度页验证
+# 数据管理：Excel 路径放项目变量 IMPORT_XLSX；10 行是信科账号内实测可搜到且有飞猪映射的真实酒店
+# 关键口径（源码 _fetch_row）：店铺有信科凭证 → 逐行走信科搜索、信科数据为准（Excel 名字仅作关键字）；
+#           无凭证 → Excel 列原样入库。本场景配置凭证，走生产同款信科链路（每行限速 0.5s）
+# 链路：配凭证 → 批量弹窗上传 → flash 任务已创建 → /tasks 刷新轮询已完成 10/10（reload:true）→ 列表 10 行
 name: 批量导入Excel与任务进度
-description: 对应用户场景 4；验证批量上传 10 家酒店的后台任务链路与任务界面
-version: 1
+description: 对应用户场景 4；批量上传 10 家真实酒店（信科为准），验证后台任务链路与任务界面
+version: 3
 trace: false
 requires:
-  env: [IMPORT_XLSX]
+  env: [IMPORT_XLSX, XK_COOKIE]
 variables:
   shopName: "E2E-批量-${var:RUN_STAMP}"
   shopUser: "e2ebat_${var:RUN_DATE}${var:RUN_TIME}"
@@ -103,9 +104,45 @@ steps:
         as: shop
         type: wait
         selector: '.topbar .usermenu'
+  - id: 店侧配置信科凭证
+    type: flow
+    expect: 本店信科平台ID（499）与Cookie（XK_COOKIE）保存成功——导入走信科为准的前提
+    steps:
+      - id: 打开店铺配置页
+        as: shop
+        type: navigate
+        url: /settings/shop
+      - id: 等本店行加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 打开本店编辑弹窗
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-edit'
+        waitFor: '#editdlg[open]'
+      - id: 填写信科店铺ID
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_shop_id"]'
+        value: "499"
+      - id: 填写真实Cookie
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_cookie"]'
+        value: ${var:XK_COOKIE}
+      - id: 保存凭证
+        as: shop
+        type: click
+        selector: '#editdlg button.btn'
+      - id: flash提示已保存
+        as: shop
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已保存
   - id: 批量弹窗上传Excel
     type: flow
-    expect: 批量操作弹窗上传 IMPORT_XLSX（10 行），提交后提示任务已创建
+    expect: 批量操作弹窗上传 IMPORT_XLSX（10 行真实酒店），提交后提示任务已创建
     steps:
       - id: 打开酒店管理页
         as: shop
@@ -145,7 +182,7 @@ steps:
         expect: 解析出全部 10 行
   - id: 任务进度页验证
     type: flow
-    expect: /tasks 页出现本店「酒店导入」任务并轮询到「已完成 10/10」
+    expect: /tasks 页出现本店「酒店导入」任务，刷新轮询到「已完成 10/10」（信科逐行限速）
     steps:
       - id: 打开任务进度页
         as: shop
@@ -158,9 +195,11 @@ steps:
       - id: 导入任务已完成10行
         as: shop
         type: js_assert
+        timeoutMs: 180000
+        reload: true
         script: '(() => { return Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("酒店导入") && tr.textContent.includes("已完成") && tr.textContent.includes("10/10")); })()'
         truthy: true
-        expect: 任务状态翻转为已完成且完成数 10/10（后台执行中会轮询等待）
+        expect: 任务状态翻转为已完成且完成数 10/10（reload 轮询捕捉后台进度）
       - id: 环节结束帧=任务页
         as: shop
         type: js_assert
@@ -169,7 +208,7 @@ steps:
         expect: 任务列表有记录
   - id: 列表验证10家酒店
     type: flow
-    expect: 酒店列表出现 E2E-批量01..10 共 10 行
+    expect: 信科为准入库后，新店列表恰 10 行在营酒店
     steps:
       - id: 回到酒店管理页
         as: shop
@@ -185,12 +224,12 @@ steps:
         script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("10"); })()'
         truthy: true
         expect: 在营酒店 KPI 为 10
-      - id: 批量行恰好10条
+      - id: 列表恰10行
         as: shop
         type: js_assert
-        script: '(() => { return Array.from(document.querySelectorAll(".tbl tbody tr")).filter((tr) => tr.textContent.includes("E2E-批量")).length === 10; })()'
+        script: 'document.querySelectorAll(".tbl tbody tr").length === 10'
         truthy: true
-        expect: E2E-批量 酒店恰 10 行（重跑 upsert 不堆积）
+        expect: 新店导入后列表恰 10 行（真实酒店名，信科数据为准）
 teardown:
   - id: 收尾停用E2E店留档
     type: flow

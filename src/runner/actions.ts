@@ -484,7 +484,11 @@ export async function executeStep(
         case "js_assert": {
           const deadline = Date.now() + timeoutMs(step, ctx);
           let last = "";
+          let first = true;
           for (;;) {
+            if (step.reload === true && !first)
+              await page.reload({ timeout: timeoutMs(step, ctx) });
+            first = false;
             const value: unknown = await page.evaluate(step.script);
             last = describeJsValue(value);
             if (jsAssertionOk(value, step)) {
