@@ -496,6 +496,7 @@ export async function executeStep(
           const subs: SubStepResult[] = [];
           let allOk = true;
           let firstError = "";
+          let lastRt: ActorRuntime | undefined;
           for (let j = 0; j < step.steps.length; j++) {
             const raw: Step = step.steps[j]!;
             // 子步骤按自己的 as 切换 actor 上下文（缺省回退 flow 层 runtime）
@@ -503,6 +504,7 @@ export async function executeStep(
               ctx.runtimeFor !== undefined
                 ? ctx.runtimeFor(raw.as)
                 : ctx.runtime;
+            lastRt = subRt;
             const subCtx: StepCtx = {
               ...ctx,
               runtime: subRt,
@@ -557,7 +559,8 @@ export async function executeStep(
               if (firstError === "") firstError = `${subId}: ${r.error}`;
             }
           }
-          if (allOk) await ctx.shot(step.id ?? step.type, "after");
+          // 环节总结截图跟随最后一个子步骤的身份（混合 actor 环节里展示谁的操作谁收尾的画面）
+          if (allOk) await ctx.shot(step.id ?? step.type, "after", lastRt);
           record(
             out,
             step,
