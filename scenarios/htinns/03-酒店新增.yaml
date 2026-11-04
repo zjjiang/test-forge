@@ -4,9 +4,10 @@
 #       点信科同步 → 断言字段回填 → 保存
 # 重复性：源码是 upsert 语义（同店+同SHID/同名 → 更新既有记录），
 #         故第二次保存应提示「已更新既有酒店」且列表行数仍为 1，不产生重复行
+# 拍图口径：同步环节与保存环节分开，使「弹窗回填画面」成为同步环节的结束帧
 name: 酒店新增与信科同步
 description: 对应用户场景 3；验证新增酒店弹窗的信科同步回填与 upsert 幂等
-version: 1
+version: 2
 trace: false
 requires:
   env: [XK_COOKIE, HOTEL_NAME]
@@ -143,7 +144,7 @@ steps:
         contains: 已保存
   - id: 新增酒店并信科同步
     type: flow
-    expect: 名称取 HOTEL_NAME，点信科同步后字段回填，保存后列表新增且恰 1 行
+    expect: 名称取 HOTEL_NAME，点信科同步后字段全部回填（环节结束帧=弹窗回填画面）
     steps:
       - id: 打开酒店管理页
         as: shop
@@ -185,6 +186,10 @@ steps:
         script: '(() => { const f = (n) => (document.querySelector("#hotelform input[name=" + JSON.stringify(n) + "]") || { value: "" }).value.trim(); return f("fliggy_shid") !== "" && f("fliggy_hid") !== ""; })()'
         truthy: true
         expect: 飞猪 SHID/HID 经平台映射补全（shopid=499 配对正确时应非空）
+  - id: 保存新增酒店
+    type: flow
+    expect: 保存成功提示「已新增酒店」，列表出现该酒店且恰 1 行
+    steps:
       - id: 点击保存
         as: shop
         type: click
@@ -201,9 +206,9 @@ steps:
         script: '(() => { const name = "${var:HOTEL_NAME}"; return Array.from(document.querySelectorAll(".tbl tbody tr")).filter((tr) => tr.textContent.includes(name)).length === 1; })()'
         truthy: true
         expect: 列表出现该酒店且仅 1 行
-  - id: 重复添加走upsert更新
+  - id: 重复打开并再次同步
     type: flow
-    expect: 同名再添加不报错不产生重复行，保存提示「已更新既有酒店」
+    expect: 同名再次信科同步成功（环节结束帧=二次弹窗画面）
     steps:
       - id: 再次点击新增酒店
         as: shop
@@ -224,6 +229,10 @@ steps:
         type: js_assert
         script: 'document.getElementById("sync-msg").textContent'
         contains: 信科同步成功
+  - id: 重复保存走upsert更新
+    type: flow
+    expect: 同名再添加不报错不产生重复行，保存提示「已更新既有酒店」
+    steps:
       - id: 点击保存2
         as: shop
         type: click
