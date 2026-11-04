@@ -108,6 +108,9 @@ export function registerTools(server: McpServer): void {
         if (d.summary !== null && d.run.status !== "running") {
           return { content: [{ type: "text", text: JSON.stringify(d.summary, null, 2) }] };
         }
+        if (d.summary === null && d.run.status !== "running") {
+          return { content: [{ type: "text", text: `run ${runId} 结束：${d.run.status}（无 summary，可能是 skipped）` }] };
+        }
         if (Date.now() >= deadline) {
           return { content: [{ type: "text", text: `等待超时（10 分钟），run ${runId} 仍在 ${d.run.status}。稍后用 get_run 再查。` }] };
         }

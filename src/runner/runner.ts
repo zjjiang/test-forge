@@ -54,7 +54,9 @@ export async function runScenario(
   opts: RunOptions,
 ): Promise<RunResult | SkipInfo> {
   const { store, scenario } = opts;
-  const missing = missingEnv(scenario);
+  /* requires.env 检查进程环境 + 项目变量（secret 存 DB，也应计入） */
+  const snapEarly = varSnapshot(store, opts.projectId);
+  const missing = missingEnv(scenario, { ...process.env, ...snapEarly.values });
   const run = createRun(store, {
     projectId: opts.projectId,
     scenarioId: scenario.name,
@@ -94,7 +96,7 @@ export async function runScenario(
     return { status: "skipped", reason, run };
   }
 
-  const snap = varSnapshot(store, opts.projectId);
+  const snap = snapEarly;
   const now = new Date();
   const pad2 = (n: number): string => String(n).padStart(2, "0");
   const mmdd = pad2(now.getMonth() + 1) + pad2(now.getDate());

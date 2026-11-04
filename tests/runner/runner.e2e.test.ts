@@ -125,6 +125,18 @@ describe("runner e2e", () => {
     expect(r.reason).toContain("DEFINITELY_MISSING_XYZ");
   });
 
+  it("requires.env 命中项目变量（secret）时不跳过", { timeout: 60000 }, async () => {
+    setVar(store, "demo", { key: "XK_COOKIE", value: "PHPSESSID=test", isSecret: true });
+    const s = makeScenario();
+    const r = await runScenario({
+      store, dataDir, projectId: "demo",
+      scenario: { ...s, requires: { env: ["XK_COOKIE"] } },
+      triggeredBy: "vitest",
+    });
+    if ("reason" in r) throw new Error("unexpected skip: " + r.reason);
+    expect(r.status, JSON.stringify(r.steps.map((x) => [x.stepId, x.status, x.error.slice(0, 150)]))).toBe("passed");
+  });
+
   it("interpolation resolves project var and override", async () => {
     setVar(store, "demo", { key: "SHOP", value: "E2E-shop", isSecret: false });
     const s = makeScenario();
