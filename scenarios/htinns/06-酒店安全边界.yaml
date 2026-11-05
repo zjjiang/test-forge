@@ -1,10 +1,11 @@
-# 场景六 v2：酒店管理安全边界（哨兵场景；数据纪律：复用固定夹具店，不新增店铺）
+# 场景六 v3：酒店管理安全边界（哨兵场景；数据纪律：复用固定夹具店，不新增店铺）
 # 夹具店 E2E-读写-1105-134852（shop_id=113，初始密码 123456）；哨兵酒店重复执行走 upsert 更新
+# 收尾用删除功能清掉哨兵酒店（feat/hotel-delete），跑完不残留
 # ① 越权：店侧 POST 编辑他店（新乡旅途）酒店 → 404 不泄露存在性；目标 id 走项目变量 OTHER_HOTEL_ID
 # ② 非法输入：打标提交非法标签值 → 302 + danger flash「非法status_tag: …」，原标签不变
 name: 酒店安全边界
-description: 对应用户场景 5 安全部分；越权 404 与非法标签输入的专职哨兵（复用夹具店不新增）
-version: 2
+description: 对应用户场景 5 安全部分；越权 404 与非法标签输入的专职哨兵（复用夹具店，收尾自动清夹具）
+version: 3
 trace: false
 requires:
   env: [OTHER_HOTEL_ID]
@@ -144,3 +145,30 @@ steps:
         script: '(() => { const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-哨兵酒店")); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "白名单酒店"; })()'
         truthy: true
         expect: 非法提交未改变原标签（仍白名单）
+teardown:
+  - id: 收尾删除哨兵酒店
+    type: flow
+    expect: 用删除功能清掉哨兵酒店，跑完不残留（越权探测目标不受影响）
+    steps:
+      - id: 收尾打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 收尾等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 删除哨兵酒店
+        as: shop
+        type: click
+        selector: '.tbl tbody tr:has(td b:text-is("E2E-哨兵酒店")) .btn-del'
+        when: 'Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("E2E-哨兵酒店"))'
+        waitFor: '.content .flash'
+      - id: 列表无残留哨兵
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 15000
+        script: '!Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("E2E-哨兵酒店"))'
+        truthy: true
+        expect: 收尾后列表不含哨兵酒店

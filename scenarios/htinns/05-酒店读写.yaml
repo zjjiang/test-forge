@@ -1,10 +1,11 @@
-# 场景五 v2：酒店管理页读写主链路（数据纪律：复用固定夹具店，不新增店铺）
+# 场景五 v3：酒店管理页读写主链路（数据纪律：复用固定夹具店，不新增店铺）
 # 夹具店 E2E-读写-1105-142121（shop_id=116，初始密码 123456）内已有读写A/读写B 两家酒店；
 # 重复执行时走 upsert「已更新既有酒店」，打标重复值报「标签无变更」，断言均已兼容
+# 收尾用删除功能清掉夹具酒店（feat/hotel-delete），跑完店铺列表为空
 # 读：搜索/分页计数/导出CSV；写：编辑预填与保存、行内打标（即改即存+落库回显）、停用与启用
 name: 酒店管理读写走查
-description: 对应用户场景 5 主链路；酒店页搜索/分页/导出 + 编辑/打标/停用启用全读写面（复用夹具店不新增）
-version: 2
+description: 对应用户场景 5 主链路；酒店页搜索/分页/导出 + 编辑/打标/停用启用全读写面（复用夹具店，收尾自动清夹具）
+version: 3
 trace: false
 requires:
   env: []
@@ -279,3 +280,36 @@ steps:
         script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("2"); })()'
         truthy: true
         expect: 启用后恢复 2/2
+teardown:
+  - id: 收尾删除夹具酒店
+    type: flow
+    expect: 用删除功能清掉读写A/读写B，跑完店铺酒店列表为空（不残留数据）
+    steps:
+      - id: 收尾打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 收尾等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 删除读写A
+        as: shop
+        type: click
+        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写A")) .btn-del'
+        when: 'document.querySelector(".tbl tbody tr b") !== null'
+        waitFor: '.content .flash'
+      - id: 删除读写B
+        as: shop
+        type: click
+        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写B")) .btn-del'
+        when: 'Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("E2E-读写B"))'
+        waitFor: '.content .flash'
+      - id: 列表无残留夹具
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 15000
+        script: '!Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("E2E-读写"))'
+        truthy: true
+        expect: 收尾后列表不含任何读写夹具酒店
