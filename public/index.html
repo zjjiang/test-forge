@@ -34,7 +34,7 @@ th,td{vertical-align:middle !important}
 td .b{display:inline-block}
 .flow img{max-width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
 .flow figure{margin:0}
-.flow figcaption{font-size:12px;margin-top:4px;overflow-wrap:anywhere}
+.flow figcaption{font-size:12px;margin-bottom:4px;overflow-wrap:anywhere}
 .flow figcaption .mut{font-size:11px;margin-top:1px}
 .app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 aside{background:var(--card);border-right:1px solid var(--line);padding-block:18px;padding-left:env(safe-area-inset-left,0px);position:sticky;top:0;align-self:start;min-height:100vh}
@@ -160,7 +160,7 @@ th,td{vertical-align:middle !important}
 td .b{display:inline-block}
 .flow img{max-width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
 .flow figure{margin:0}
-.flow figcaption{font-size:12px;margin-top:4px;overflow-wrap:anywhere}
+.flow figcaption{font-size:12px;margin-bottom:4px;overflow-wrap:anywhere}
 .flow figcaption .mut{font-size:11px;margin-top:1px}
 .app.solo .home{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 </style></head><body>
@@ -695,13 +695,13 @@ async function viewRun() {
       var label = g.st.stepId + (g.st.expect && g.st.expect !== g.st.stepId ? ' — ' + g.st.expect : '');
       var idx = S.shots.length;
       S.shots.push({ src: base + f, caption: label + ' · ' + f });
-      h += '<figure><img src="' + base + esc(f) + '" loading="lazy" style="max-width:100%;cursor:zoom-in" onclick="lbOpen(' + idx + ')" title="点击放大">'
-        + '<figcaption>' + cap + '<div class="mut">' + esc(f) + '</div>'
+      h += '<figure><figcaption>' + cap + '<div class="mut">' + esc(f) + '</div></figcaption>'
+        + '<img src="' + base + esc(f) + '" loading="lazy" style="max-width:100%;cursor:zoom-in" onclick="lbOpen(' + idx + ')" title="点击放大">'
         + (g.small.length || (g.st.subSteps || []).length
           ? '<details class="small"><summary>展开 ' + (g.small.length + (g.st.subSteps || []).length) + ' 个小步骤</summary>'
             + rows(g.small) + flowSubRows(g.st) + '</details>'
           : '')
-        + '</figcaption></figure>';
+        + '</figure>';
     });
   });
   if (groups.length && pending.length) {
