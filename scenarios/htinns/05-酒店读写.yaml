@@ -1,85 +1,23 @@
-# 场景五：酒店管理页读写主链路（夹具：手工新增 2 家，不依赖信科）
+# 场景五 v2：酒店管理页读写主链路（数据纪律：复用固定夹具店，不新增店铺）
+# 夹具店 E2E-读写-1105-142121（shop_id=116，初始密码 123456）内已有读写A/读写B 两家酒店；
+# 重复执行时走 upsert「已更新既有酒店」，打标重复值报「标签无变更」，断言均已兼容
 # 读：搜索/分页计数/导出CSV；写：编辑预填与保存、行内打标（即改即存+落库回显）、停用与启用
-# 口径备忘（源码）：编辑保存 flash「已保存修改」；打标 onchange 提交 flash「已更新 N 项标签」，
-#   无 SHID 的行打标下拉禁用（夹具酒店必须带 SHID）；停用/启用是行内表单裸按钮，flash 已停用/已启用
 name: 酒店管理读写走查
-description: 对应用户场景 5 主链路；酒店页搜索/分页/导出 + 编辑/打标/停用启用全读写面
-version: 1
+description: 对应用户场景 5 主链路；酒店页搜索/分页/导出 + 编辑/打标/停用启用全读写面（复用夹具店不新增）
+version: 2
 trace: false
 requires:
   env: []
 variables:
-  shopName: "E2E-读写-${var:RUN_STAMP}"
-  shopUser: "e2erw_${var:RUN_DATE}${var:RUN_TIME}"
+  shopUser: "e2erw_20261105142121"
 actors:
-  admin:
-    description: 管理员
-    dialogs: accept
   shop:
-    description: E2E 测试店铺身份
+    description: 夹具店铺身份（E2E-读写-1105-142121）
     dialogs: accept
 steps:
-  - id: 管理员登录并新增E2E店
-    type: flow
-    expect: admin 登录成功并创建 E2E 测试店
-    steps:
-      - id: admin打开登录页
-        as: admin
-        type: navigate
-        url: /login
-      - id: admin填写账号
-        as: admin
-        type: fill
-        selector: 'input[name="username"]'
-        value: ${var:ADMIN_USER}
-      - id: admin填写密码
-        as: admin
-        type: fill
-        selector: 'input[name="password"]'
-        value: ${var:ADMIN_PW}
-      - id: admin提交登录
-        as: admin
-        type: click
-        selector: 'form button[type="submit"]'
-      - id: admin登录成功
-        as: admin
-        type: wait
-        selector: '.topbar .usermenu'
-      - id: 打开店铺配置页
-        as: admin
-        type: navigate
-        url: /settings/shop
-      - id: 等店铺列表加载
-        as: admin
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 点击增加店铺
-        as: admin
-        type: click
-        selector: '#btn-add-shop'
-        waitFor: '#adddlg[open]'
-      - id: 填写店铺名
-        as: admin
-        type: fill
-        selector: '#adddlg input[name="name"]'
-        value: ${var:shopName}
-      - id: 填写店铺账号
-        as: admin
-        type: fill
-        selector: '#adddlg input[name="username"]'
-        value: ${var:shopUser}
-      - id: 保存新店
-        as: admin
-        type: click
-        selector: '#adddlg button.btn'
-      - id: E2E店创建成功
-        as: admin
-        type: dom_assert
-        selector: '.content .flash'
-        contains: 已创建
   - id: 店侧基线登录
     type: flow
-    expect: E2E 店账号可正常登录（基线）
+    expect: 夹具店账号可正常登录（基线）
     steps:
       - id: 店铺账号打开登录页
         as: shop
@@ -103,9 +41,9 @@ steps:
         as: shop
         type: wait
         selector: '.topbar .usermenu'
-  - id: 手工新增两家夹具酒店
+  - id: 夹具酒店确保就绪
     type: flow
-    expect: 手填两家用作读写夹具（带 SHID 否则打标下拉禁用），列表恰 2 行
+    expect: 读写A/读写B 两家夹具就绪（首次新增，重复执行走 upsert 更新），列表恰 2 行
     steps:
       - id: 打开酒店管理页
         as: shop
@@ -139,11 +77,12 @@ steps:
         as: shop
         type: click
         selector: '#hotelform button[type="submit"]'
-      - id: 新增A-flash已新增
+      - id: 新增A-flash落库
         as: shop
-        type: dom_assert
-        selector: '.content .flash'
-        contains: 已新增酒店
+        type: js_assert
+        script: '/(已新增酒店|已更新既有酒店)/.test((document.querySelector(".content .flash") || { textContent: "" }).textContent)'
+        truthy: true
+        expect: A 保存成功（新增或更新均认可）
       - id: 新增B-打开弹窗
         as: shop
         type: click
@@ -168,11 +107,12 @@ steps:
         as: shop
         type: click
         selector: '#hotelform button[type="submit"]'
-      - id: 新增B-flash已新增
+      - id: 新增B-flash落库
         as: shop
-        type: dom_assert
-        selector: '.content .flash'
-        contains: 已新增酒店
+        type: js_assert
+        script: '/(已新增酒店|已更新既有酒店)/.test((document.querySelector(".content .flash") || { textContent: "" }).textContent)'
+        truthy: true
+        expect: B 保存成功（新增或更新均认可）
       - id: 列表恰2行
         as: shop
         type: js_assert
@@ -270,11 +210,12 @@ steps:
         selector: '.tbl tbody tr:has(td b:text-is("E2E-读写A")) select[name="status_tag"]'
         value: 优质酒店
         expect: 行内状态即改即存
-      - id: flash已更新标签
+      - id: flash标签提交完成
         as: shop
-        type: dom_assert
-        selector: '.content .flash'
-        contains: 已更新
+        type: js_assert
+        script: '/(已更新|标签无变更)/.test((document.querySelector(".content .flash") || { textContent: "" }).textContent)'
+        truthy: true
+        expect: 打标提交被受理（变更报已更新，重复值报无变更）
       - id: A行档位选高
         as: shop
         type: select
@@ -297,7 +238,7 @@ steps:
       - id: A行选中值仍为优质
         as: shop
         type: js_assert
-        script: '(() => { const sel = document.querySelector(".tbl tbody tr select[name=\"status_tag\"]") || Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-读写A")); const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-读写A")); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "优质酒店"; })()'
+        script: '(() => { const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-读写A")); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "优质酒店"; })()'
         truthy: true
         expect: 刷新后下拉选中值仍为优质（已落库）
   - id: 停用与启用
@@ -338,26 +279,3 @@ steps:
         script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("2"); })()'
         truthy: true
         expect: 启用后恢复 2/2
-teardown:
-  - id: 收尾停用E2E店留档
-    type: flow
-    expect: E2E 店若仍在营则停用留档
-    steps:
-      - id: 收尾等登录完成
-        as: admin
-        type: wait
-        selector: '.topbar .usermenu'
-      - id: 收尾打开店铺配置页
-        as: admin
-        type: navigate
-        url: /settings/shop
-      - id: 收尾等列表加载
-        as: admin
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 停用E2E店留档（仅当仍在营）
-        as: admin
-        type: click
-        selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
-        when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
-        onFail: warn
