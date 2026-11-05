@@ -130,19 +130,20 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 .modal-x{position:absolute;top:14px;right:16px;font-size:22px;background:none;border:0;cursor:pointer;color:var(--mut)}
 #lb{position:fixed;inset:0;background:rgba(10,14,22,.86);display:flex;align-items:center;justify-content:center;z-index:50}
 #lb[hidden]{display:none}
-#lb figure{margin:0;max-width:92vw;display:flex;flex-direction:column}
-#lb img{max-width:92vw;max-height:82vh;object-fit:contain;border-radius:4px;background:#fff}
-#lb figcaption{color:#e5eaf4;font-size:13px;text-align:left;margin-bottom:10px;display:flex;flex-direction:column;gap:4px;max-width:92vw}
-#lb figcaption b{font-size:15px}
+#lb figure{margin:0;max-width:96vw;display:flex;flex-direction:row;gap:20px;align-items:center}
+#lb img{max-width:calc(96vw - 360px);max-height:86vh;object-fit:contain;border-radius:4px;background:#fff}
+#lb figcaption{color:#e5eaf4;font-size:14px;text-align:left;flex:0 0 340px;display:flex;flex-direction:column;gap:8px;max-height:86vh;overflow:auto}
+#lb figcaption b{font-size:18px}
 .lb-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.lb-count{color:#9aa3b5;font-size:13px !important;font-weight:600}
-.lb-step{font-size:16px !important}
-.lb-mut{color:#9aa3b5;font-size:12px}
-.lb-ai{font-size:13px;padding:4px 10px;border-radius:6px;width:fit-content;background:rgba(255,255,255,.07)}
+.lb-count{color:#9aa3b5;font-size:14px !important;font-weight:600}
+.lb-step{font-size:19px !important;line-height:1.3}
+.lb-mut{color:#9aa3b5;font-size:14px;line-height:1.5}
+.lb-ai{font-size:14px;line-height:1.5;padding:6px 12px;border-radius:6px;width:fit-content;background:rgba(255,255,255,.07)}
 .lb-ai.ok{color:#7ee2a0;border:1px solid rgba(126,226,160,.45)}
 .lb-ai.bad{color:#ff9d94;border:1px solid rgba(255,157,148,.5)}
-.lb-plain{padding:4px 10px;border-radius:6px;background:rgba(255,255,255,.04)}
-.lb-file{font:11px var(--f-mono);color:#6d768c}
+.lb-plain{padding:6px 12px;border-radius:6px;background:rgba(255,255,255,.04)}
+.lb-file{font:12px var(--f-mono);color:#6d768c}
+@media (max-width:900px){#lb figure{flex-direction:column}#lb img{max-width:92vw}#lb figcaption{flex:none;max-width:92vw}}
 .lb-x{position:fixed;top:12px;right:20px;font-size:24px;background:none;border:0;color:#fff;cursor:pointer}
 .lb-nav{position:fixed;top:50%;transform:translateY(-50%);font-size:32px;line-height:1;width:46px;height:46px;background:rgba(255,255,255,.14);border:0;color:#fff;cursor:pointer;border-radius:50%}
 .lb-nav:hover{background:rgba(255,255,255,.28)}
@@ -792,14 +793,14 @@ function drawLb() {
     : '<div class="lb-mut lb-plain">AI 判定：无（本步骤确定性断言 ' + esc(s.det) + ' 全部通过）</div>';
   lb.innerHTML = '<button class="lb-x" title="关闭 (Esc)" onclick="closeLb()">×</button>'
     + (S.shots.length > 1 ? '<button class="lb-nav lb-prev" title="上一张 (←)" onclick="lbGo(-1)"' + (S.lb === 0 ? ' disabled' : '') + '>‹</button><button class="lb-nav lb-next" title="下一张 (→)" onclick="lbGo(1)"' + (S.lb === S.shots.length - 1 ? ' disabled' : '') + '>›</button>' : '')
-    + '<figure><figcaption>'
+    + '<figure><img src="' + esc(s.src) + '" alt=""><figcaption>'
       + '<div class="lb-row"><b class="lb-count">' + (S.lb + 1) + ' / ' + S.shots.length + '</b><b class="lb-step">' + esc(s.stepId) + '</b>' + badge(s.status)
       + '<span class="lb-mut">步骤 ' + s.sn + ' · 角色 ' + esc(s.actor || '—') + '</span></div>'
       + (s.expect && s.expect !== s.stepId ? '<div class="lb-mut">验收点：' + esc(s.expect) + '</div>' : '')
       + '<div class="lb-mut">确定性断言 ' + esc(s.det) + ' 通过</div>'
       + aiHtml
       + '<div class="lb-file">' + esc(s.file) + '</div>'
-    + '</figcaption><img src="' + esc(s.src) + '" alt=""></figure>'
+    + '</figcaption></figure>'
 }
 
 window.addEventListener('beforeunload', function () { if (S.poll) clearInterval(S.poll); });
