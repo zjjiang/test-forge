@@ -489,7 +489,25 @@ export async function executeStep(
             if (step.reload === true && !first)
               await page.reload({ timeout: timeoutMs(step, ctx) });
             first = false;
-            const value: unknown = await page.evaluate(step.script);
+            let value: unknown;
+            try {
+              value = await page.evaluate(step.script);
+            } catch {
+              // 导航进行中等瞬态错误：按可重试处理（限时内继续轮询）
+              if (Date.now() >= deadline) {
+                record(
+                  out,
+                  step,
+                  "det",
+                  describeJsExpectation(step),
+                  "页面导航中无法求值（超时）",
+                  false,
+                );
+                return false;
+              }
+              await page.waitForTimeout(500);
+              continue;
+            }
             last = describeJsValue(value);
             if (jsAssertionOk(value, step)) {
               record(out, step, "det", describeJsExpectation(step), last, true);
