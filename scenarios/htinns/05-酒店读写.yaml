@@ -1,14 +1,17 @@
-# 场景五 v3：酒店管理页读写主链路（数据纪律：复用固定夹具店，不新增店铺）
-# 夹具店 E2E-读写-1105-142121（shop_id=116，初始密码 123456）内已有读写A/读写B 两家酒店；
-# 重复执行时走 upsert「已更新既有酒店」，打标重复值报「标签无变更」，断言均已兼容
-# 收尾用删除功能清掉夹具酒店（feat/hotel-delete），跑完店铺列表为空
+# 场景五 v4：酒店管理页读写主链路（数据纪律 v2：酒店也用真实数据）
+# 夹具店 E2E-读写-1105-142121（shop_id=116，初始密码 123456）；
+# 夹具酒店不再用编造的 E2E-读写A/B，改为批量导入 IMPORT_XLSX 的 10 家真实酒店（信科为准，
+# 带真实 SHID/供应商/城市），写操作（编辑/打标/停用）只发生在夹具店内且收尾全部删除，不影响真实店
 # 读：搜索/分页计数/导出CSV；写：编辑预填与保存、行内打标（即改即存+落库回显）、停用与启用
+# 信科偶发超时（单行30s读超时）会致个别行失败：门禁以酒店列表轮询为准（reload 轮询恰 10 行，
+# 不去任务页等「已完成」——导入提交后重定向回 /hotels，任务行完成即清）；补导环节整份 Excel
+# 幂等重导（upsert，已有行走更新、缺失行补进）兜底；收尾逐行删除，跑完店铺列表为空
 name: 酒店管理读写走查
-description: 对应用户场景 5 主链路；酒店页搜索/分页/导出 + 编辑/打标/停用启用全读写面（复用夹具店，收尾自动清夹具）
-version: 3
+description: 对应用户场景 5 主链路；酒店页搜索/分页/导出 + 编辑/打标/停用启用全读写面（夹具店 + Excel 真实酒店，收尾自动清理）
+version: 4
 trace: false
 requires:
-  env: []
+  env: [IMPORT_XLSX, XK_COOKIE]
 variables:
   shopUser: "e2erw_20261105142121"
 actors:
@@ -42,9 +45,45 @@ steps:
         as: shop
         type: wait
         selector: '.topbar .usermenu'
-  - id: 夹具酒店确保就绪
+  - id: 店侧配置信科凭证
     type: flow
-    expect: 读写A/读写B 两家夹具就绪（首次新增，重复执行走 upsert 更新），列表恰 2 行
+    expect: 本店信科平台ID（499）与Cookie（XK_COOKIE）保存成功——导入走信科为准的前提
+    steps:
+      - id: 打开店铺配置页
+        as: shop
+        type: navigate
+        url: /settings/shop
+      - id: 等本店行加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 打开本店编辑弹窗
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-edit'
+        waitFor: '#editdlg[open]'
+      - id: 填写信科店铺ID
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_shop_id"]'
+        value: "499"
+      - id: 填写真实Cookie
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_cookie"]'
+        value: ${var:XK_COOKIE}
+      - id: 保存凭证
+        as: shop
+        type: click
+        selector: '#editdlg button.btn'
+      - id: flash提示已保存
+        as: shop
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已保存
+  - id: 批量导入10家真实酒店
+    type: flow
+    expect: 上传 IMPORT_XLSX（10 家真实酒店，信科为准入库，带真实 SHID/供应商/城市），任务结束列表恰 10 行
     steps:
       - id: 打开酒店管理页
         as: shop
@@ -54,92 +93,106 @@ steps:
         as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 新增A-打开弹窗
+      - id: 点击批量操作
         as: shop
         type: click
-        selector: '#btn-new'
-        waitFor: '#hoteldlg[open]'
-      - id: 新增A-填名称
+        selector: '#btn-import'
+        waitFor: '#batchdlg[open]'
+        expect: 打开批量操作弹窗
+      - id: 上传Excel文件
         as: shop
-        type: fill
-        selector: '#hotelform input[name="hotel_name"]'
-        value: E2E-读写A
-      - id: 新增A-填SHID
-        as: shop
-        type: fill
-        selector: '#hotelform input[name="fliggy_shid"]'
-        value: E2E-SH-001
-      - id: 新增A-填城市
-        as: shop
-        type: fill
-        selector: '#hotelform input[name="city_name"]'
-        value: 郑州
-      - id: 新增A-保存
+        type: upload
+        selector: '#batchform input[type="file"]'
+        path: ${var:IMPORT_XLSX}
+        expect: 选择本地 Excel 数据文件（IMPORT_XLSX）
+      - id: 提交导入
         as: shop
         type: click
-        selector: '#hotelform button[type="submit"]'
-      - id: 新增A-flash落库
+        selector: '#batchform button[type="submit"]'
+      - id: flash提示任务已创建
         as: shop
         type: js_assert
-        script: '/(已新增酒店|已更新既有酒店)/.test((document.querySelector(".content .flash") || { textContent: "" }).textContent)'
-        truthy: true
-        expect: A 保存成功（新增或更新均认可）
-      - id: 新增B-打开弹窗
-        as: shop
-        type: click
-        selector: '#btn-new'
-        waitFor: '#hoteldlg[open]'
-      - id: 新增B-填名称
-        as: shop
-        type: fill
-        selector: '#hotelform input[name="hotel_name"]'
-        value: E2E-读写B
-      - id: 新增B-填SHID
-        as: shop
-        type: fill
-        selector: '#hotelform input[name="fliggy_shid"]'
-        value: E2E-SH-002
-      - id: 新增B-填城市
-        as: shop
-        type: fill
-        selector: '#hotelform input[name="city_name"]'
-        value: 洛阳
-      - id: 新增B-保存
-        as: shop
-        type: click
-        selector: '#hotelform button[type="submit"]'
-      - id: 新增B-flash落库
+        script: '(document.querySelector(".content .flash") || { textContent: "" }).textContent'
+        contains: 任务已创建
+        expect: 任务已创建（含任务号与行数）
+      - id: 提示共10行
         as: shop
         type: js_assert
-        script: '/(已新增酒店|已更新既有酒店)/.test((document.querySelector(".content .flash") || { textContent: "" }).textContent)'
-        truthy: true
-        expect: B 保存成功（新增或更新均认可）
-      - id: 列表恰2行
+        script: '(document.querySelector(".content .flash") || { textContent: "" }).textContent'
+        contains: 共 10 行
+        expect: 解析出全部 10 行
+      # 不去任务进度页轮询「已完成」：导入提交后重定向回 /hotels，
+      # 任务页需额外导航且任务行完成即清；真正的门禁是下面的列表恰 10 行
+      # （reload 轮询最长 10 分钟，信科单行最久 30s 超时、个别行失败由补导环节兜底）
+      - id: 回酒店页等列表10行
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 列表恰10行在营
         as: shop
         type: js_assert
-        script: 'document.querySelectorAll(".tbl tbody tr").length === 2'
+        reload: true
+        timeoutMs: 600000
+        script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return document.querySelectorAll(".tbl tbody tr").length === 10 && card !== undefined && card.textContent.includes("10"); })()'
         truthy: true
-        expect: 夹具就绪，恰 2 行
+        expect: 夹具就绪，10 家真实酒店全部入库且在营
+  - id: 补导缺失行（仅当不足10行）
+    type: flow
+    expect: Excel 为 upsert 幂等语义，若首轮个别行信科超时失败，则整份 Excel 再导一遍（已有行走更新，缺失行补进），直到列表恰 10 行
+    steps:
+      - id: 回酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载3
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 补导-点击批量操作
+        as: shop
+        type: click
+        selector: '#btn-import'
+        waitFor: '#batchdlg[open]'
+        when: 'document.querySelectorAll(".tbl tbody tr").length < 10'
+      - id: 补导-上传Excel
+        as: shop
+        type: upload
+        selector: '#batchform input[type="file"]'
+        path: ${var:IMPORT_XLSX}
+        when: 'document.querySelectorAll(".tbl tbody tr").length < 10'
+      - id: 补导-提交导入
+        as: shop
+        type: click
+        selector: '#batchform button[type="submit"]'
+        when: 'document.querySelectorAll(".tbl tbody tr").length < 10'
+      - id: 补导-等列表凑齐10行
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 600000
+        script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return document.querySelectorAll(".tbl tbody tr").length === 10 && card !== undefined && card.textContent.includes("10"); })()'
+        truthy: true
+        expect: 补导后列表恰 10 行在营（已满 10 行则本环节直接通过）
   - id: 搜索与分页计数
     type: flow
-    expect: 关键字搜索恰命中 A 一家；清空后计数条「共 2 家 · 第 1 / 1 页」
+    expect: 关键字搜索恰命中「连云港海州湾voco酒店」一家；清空后计数条「共 10 家 · 第 1 / 1 页」
     steps:
-      - id: 搜索框填A
+      - id: 搜索框填真实酒店名
         as: shop
         type: fill
         selector: '.controls input[name="q"]'
-        value: E2E-读写A
+        value: 连云港海州湾voco酒店
       - id: 回车提交搜索
         as: shop
         type: press
         selector: '.controls input[name="q"]'
         key: Enter
-      - id: 恰命中A一行
+      - id: 恰命中该酒店一行
         as: shop
         type: js_assert
-        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); return rows.length === 1 && rows[0].textContent.includes("E2E-读写A") && !rows[0].textContent.includes("E2E-读写B"); })()'
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); return rows.length === 1 && rows[0].textContent.includes("连云港海州湾voco酒店"); })()'
         truthy: true
-        expect: 搜索只命中 E2E-读写A
+        expect: 搜索只命中连云港海州湾voco酒店
       - id: 清空回全量列表
         as: shop
         type: navigate
@@ -147,9 +200,9 @@ steps:
       - id: 计数条自洽
         as: shop
         type: js_assert
-        script: '(() => { const note = Array.from(document.querySelectorAll("p.note")).map((p) => p.textContent).find((t) => t.includes("共")); return note !== undefined && note.includes("共 2 家") && note.includes("第 1 / 1 页"); })()'
+        script: '(() => { const note = Array.from(document.querySelectorAll("p.note")).map((p) => p.textContent).find((t) => t.includes("共")); return note !== undefined && note.includes("共 10 家") && note.includes("第 1 / 1 页"); })()'
         truthy: true
-        expect: 「共 2 家 · 第 1 / 1 页」互洽
+        expect: 「共 10 家 · 第 1 / 1 页」互洽
   - id: 导出CSV
     type: flow
     expect: 导出按钮落盘 hotels_*.csv
@@ -161,20 +214,20 @@ steps:
         namePrefix: hotels_
         nameSuffix: .csv
         expect: 导出文件下载成功
-  - id: 编辑酒店
+  - id: 编辑真实酒店
     type: flow
-    expect: 编辑弹窗预填当前值，改城市与电话保存后行内回显
+    expect: 编辑弹窗预填当前值，改城市与电话保存后行内回显（仅改夹具店内数据，收尾删除）
     steps:
-      - id: 打开A的编辑弹窗
+      - id: 打开真实酒店的编辑弹窗
         as: shop
         type: click
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写A")) .btn-edit'
+        selector: '.tbl tbody tr:has(td b:text-is("连云港海州湾voco酒店")) .btn-edit'
         waitFor: '#hoteldlg[open]'
       - id: 弹窗预填当前名称
         as: shop
         type: js_assert
         script: 'document.querySelector("#hotelform input[name=\"hotel_name\"]").value'
-        equals: E2E-读写A
+        equals: 连云港海州湾voco酒店
         expect: 编辑弹窗预填既有值
       - id: 改城市为西安
         as: shop
@@ -198,17 +251,17 @@ steps:
       - id: 行内回显新城市
         as: shop
         type: js_assert
-        script: '(() => { const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-读写A")); return row !== undefined && row.textContent.includes("西安"); })()'
+        script: '(() => { const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("连云港海州湾voco酒店")); return row !== undefined && row.textContent.includes("西安"); })()'
         truthy: true
         expect: 列表行回显修改后的城市
   - id: 行内打标
     type: flow
-    expect: 状态选优质、档位选高（即改即存），刷新回显落库；优质筛选恰命中 A
+    expect: 状态选优质、档位选高（即改即存），刷新回显落库；优质筛选恰命中该真实酒店
     steps:
-      - id: A行状态选优质
+      - id: 该行状态选优质
         as: shop
         type: select
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写A")) select[name="status_tag"]'
+        selector: '.tbl tbody tr:has(td b:text-is("连云港海州湾voco酒店")) select[name="status_tag"]'
         value: 优质酒店
         expect: 行内状态即改即存
       - id: flash标签提交完成
@@ -217,73 +270,73 @@ steps:
         script: '/(已更新|标签无变更)/.test((document.querySelector(".content .flash") || { textContent: "" }).textContent)'
         truthy: true
         expect: 打标提交被受理（变更报已更新，重复值报无变更）
-      - id: A行档位选高
+      - id: 该行档位选高
         as: shop
         type: select
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写A")) select[name="ratio_tier"]'
+        selector: '.tbl tbody tr:has(td b:text-is("连云港海州湾voco酒店")) select[name="ratio_tier"]'
         value: 高
-      - id: 优质筛选恰命中A
+      - id: 优质筛选恰命中该酒店
         as: shop
         type: navigate
         url: /hotels?tag=优质酒店
-      - id: 筛选结果恰1行A
+      - id: 筛选结果恰1行
         as: shop
         type: js_assert
-        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); return rows.length === 1 && rows[0].textContent.includes("E2E-读写A"); })()'
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); return rows.length === 1 && rows[0].textContent.includes("连云港海州湾voco酒店"); })()'
         truthy: true
-        expect: 优质标签筛选恰命中 E2E-读写A
+        expect: 优质标签筛选恰命中该真实酒店
       - id: 回全量并验证回显落库
         as: shop
         type: navigate
         url: /hotels
-      - id: A行选中值仍为优质
+      - id: 该行选中值仍为优质
         as: shop
         type: js_assert
-        script: '(() => { const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-读写A")); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "优质酒店"; })()'
+        script: '(() => { const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("连云港海州湾voco酒店")); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "优质酒店"; })()'
         truthy: true
         expect: 刷新后下拉选中值仍为优质（已落库）
   - id: 停用与启用
     type: flow
-    expect: 行内停用后 KPI 1/2，再启用恢复 2/2
+    expect: 行内停用后 KPI 9/10，再启用恢复 10/10
     steps:
-      - id: A行点击停用
+      - id: 该行点击停用
         as: shop
         type: click
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写A")) td.ops form button'
-        when: '(() => { const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-读写A")); const btn = row && row.querySelector("td.ops form button"); return btn !== null && btn.textContent.trim() === "停用"; })()'
+        selector: '.tbl tbody tr:has(td b:text-is("连云港海州湾voco酒店")) td.ops form button'
+        when: '(() => { const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("连云港海州湾voco酒店")); const btn = row && row.querySelector("td.ops form button"); return btn !== null && btn.textContent.trim() === "停用"; })()'
         waitFor: '.content .flash'
       - id: flash已停用
         as: shop
         type: dom_assert
         selector: '.content .flash'
         contains: 已停用
-      - id: KPI在营1家
+      - id: KPI在营9家
         as: shop
         type: js_assert
-        script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("1"); })()'
+        script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("9"); })()'
         truthy: true
-        expect: 停用后在营 KPI 为 1/2
-      - id: A行点击启用
+        expect: 停用后在营 KPI 为 9/10
+      - id: 该行点击启用
         as: shop
         type: click
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写A")) td.ops form button'
-        when: '(() => { const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-读写A")); const btn = row && row.querySelector("td.ops form button"); return btn !== null && btn.textContent.trim() === "启用"; })()'
+        selector: '.tbl tbody tr:has(td b:text-is("连云港海州湾voco酒店")) td.ops form button'
+        when: '(() => { const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("连云港海州湾voco酒店")); const btn = row && row.querySelector("td.ops form button"); return btn !== null && btn.textContent.trim() === "启用"; })()'
         waitFor: '.content .flash'
       - id: flash已启用
         as: shop
         type: dom_assert
         selector: '.content .flash'
         contains: 已启用
-      - id: KPI恢复2家
+      - id: KPI恢复10家
         as: shop
         type: js_assert
-        script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("2"); })()'
+        script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("10"); })()'
         truthy: true
-        expect: 启用后恢复 2/2
+        expect: 启用后恢复 10/10
 teardown:
-  - id: 收尾删除夹具酒店
+  - id: 收尾清空导入酒店
     type: flow
-    expect: 用删除功能清掉读写A/读写B，跑完店铺酒店列表为空（不残留数据）
+    expect: 用删除功能逐行清空导入的酒店，跑完店铺酒店列表为空（不残留数据）
     steps:
       - id: 收尾打开酒店管理页
         as: shop
@@ -293,23 +346,121 @@ teardown:
         as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 删除读写A
+      - id: 收尾删除第01家
         as: shop
         type: click
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写A")) .btn-del'
-        when: 'document.querySelector(".tbl tbody tr b") !== null'
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
         waitFor: '.content .flash'
-      - id: 删除读写B
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第02家
         as: shop
         type: click
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-读写B")) .btn-del'
-        when: 'Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("E2E-读写B"))'
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
         waitFor: '.content .flash'
-      - id: 列表无残留夹具
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第03家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第04家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第05家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第06家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第07家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第08家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第09家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第10家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾列表清空
         as: shop
         type: js_assert
         reload: true
         timeoutMs: 15000
-        script: '!Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("E2E-读写"))'
+        script: 'document.querySelectorAll(".tbl tbody tr .btn-del").length === 0 && !Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.querySelector("td b"))'
         truthy: true
-        expect: 收尾后列表不含任何读写夹具酒店
+        expect: 收尾后无可删除酒店（空列表占位行兼容；下次运行重新导入重建）

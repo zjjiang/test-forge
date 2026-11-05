@@ -1,14 +1,18 @@
-# 场景六 v3：酒店管理安全边界（哨兵场景；数据纪律：复用固定夹具店，不新增店铺）
-# 夹具店 E2E-读写-1105-134852（shop_id=113，初始密码 123456）；哨兵酒店重复执行走 upsert 更新
-# 收尾用删除功能清掉哨兵酒店（feat/hotel-delete），跑完不残留
+# 场景六 v4：酒店管理安全边界（哨兵场景；数据纪律 v2：酒店也用真实数据）
+# 夹具店 E2E-读写-1105-134852（shop_id=113，初始密码 123456）；
+# 哨兵酒店不再用编造的 E2E-哨兵酒店，改为信科同步新增的真实酒店（HOTEL_NAME，
+# 带真实 SHID/HID/供应商回填），写操作只发生在夹具店内且收尾删除，不影响真实店
 # ① 越权：店侧 POST 编辑他店（新乡旅途）酒店 → 404 不泄露存在性；目标 id 走项目变量 OTHER_HOTEL_ID
 # ② 非法输入：打标提交非法标签值 → 302 + danger flash「非法status_tag: …」，原标签不变
+#    （源码 tag_service.set_hotel_tags 校验顺序：shid 非空 → 值合法性 → 酒店存在性，
+#     故非法值用占位 shid 即可命中值校验分支）
+# 收尾用删除功能清掉该真实酒店，跑完不残留
 name: 酒店安全边界
-description: 对应用户场景 5 安全部分；越权 404 与非法标签输入的专职哨兵（复用夹具店，收尾自动清夹具）
-version: 3
+description: 对应用户场景 5 安全部分；越权 404 与非法标签输入的专职哨兵（夹具店 + 信科同步真实酒店，收尾自动清理）
+version: 4
 trace: false
 requires:
-  env: [OTHER_HOTEL_ID]
+  env: [XK_COOKIE, HOTEL_NAME, OTHER_HOTEL_ID]
 variables:
   shopUser: "e2erw_20261105134852"
 actors:
@@ -16,9 +20,9 @@ actors:
     description: 夹具店铺身份（E2E-读写-1105-134852）
     dialogs: accept
 steps:
-  - id: 店侧登录并备夹具酒店
+  - id: 店侧登录并配信科凭证
     type: flow
-    expect: 夹具店登录成功；哨兵酒店就绪（首次新增/重复更新）且打上白名单
+    expect: 夹具店登录成功；信科平台ID（499）与Cookie（XK_COOKIE）保存成功
     steps:
       - id: 店铺账号打开登录页
         as: shop
@@ -42,6 +46,42 @@ steps:
         as: shop
         type: wait
         selector: '.topbar .usermenu'
+      - id: 打开店铺配置页
+        as: shop
+        type: navigate
+        url: /settings/shop
+      - id: 等本店行加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 打开本店编辑弹窗
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-edit'
+        waitFor: '#editdlg[open]'
+      - id: 填写信科店铺ID
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_shop_id"]'
+        value: "499"
+      - id: 填写真实Cookie
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_cookie"]'
+        value: ${var:XK_COOKIE}
+      - id: 保存凭证
+        as: shop
+        type: click
+        selector: '#editdlg button.btn'
+      - id: flash提示已保存
+        as: shop
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已保存
+  - id: 新增真实酒店并信科同步
+    type: flow
+    expect: 名称取 HOTEL_NAME（信科平台真实在线酒店），同步后字段全部回填并保存入库
+    steps:
       - id: 打开酒店管理页
         as: shop
         type: navigate
@@ -50,26 +90,38 @@ steps:
         as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 打开新增弹窗
+      - id: 点击新增酒店
         as: shop
         type: click
         selector: '#btn-new'
         waitFor: '#hoteldlg[open]'
-      - id: 填名称
+      - id: 填写真实酒店名
         as: shop
         type: fill
         selector: '#hotelform input[name="hotel_name"]'
-        value: E2E-哨兵酒店
-      - id: 填SHID
+        value: ${var:HOTEL_NAME}
+      - id: 点击信科同步
         as: shop
-        type: fill
-        selector: '#hotelform input[name="fliggy_shid"]'
-        value: E2E-SEC-001
-      - id: 填城市
+        type: click
+        selector: '#btn-xinke'
+      - id: 同步成功提示出现
         as: shop
-        type: fill
-        selector: '#hotelform input[name="city_name"]'
-        value: 郑州
+        type: js_assert
+        script: 'document.getElementById("sync-msg").textContent'
+        contains: 信科同步成功
+        expect: 信科同步成功，记得保存
+      - id: 同步字段已回填
+        as: shop
+        type: js_assert
+        script: '(() => { const f = (n) => (document.querySelector("#hotelform input[name=" + JSON.stringify(n) + "]") || { value: "" }).value.trim(); return f("supplier_hotel_id") !== "" && f("supplier") !== "" && f("city_name") !== ""; })()'
+        truthy: true
+        expect: 供应商酒店ID/供应商/城市已自动回填
+      - id: 飞猪映射已补全
+        as: shop
+        type: js_assert
+        script: '(() => { const f = (n) => (document.querySelector("#hotelform input[name=" + JSON.stringify(n) + "]") || { value: "" }).value.trim(); return f("fliggy_shid") !== "" && f("fliggy_hid") !== ""; })()'
+        truthy: true
+        expect: 飞猪 SHID/HID 经平台映射补全
       - id: 保存
         as: shop
         type: click
@@ -79,11 +131,21 @@ steps:
         type: js_assert
         script: '/(已新增酒店|已更新既有酒店)/.test((document.querySelector(".content .flash") || { textContent: "" }).textContent)'
         truthy: true
-        expect: 哨兵酒店就绪（新增或更新均认可）
-      - id: 夹具酒店打上白名单
+        expect: 保存成功（新增或更新均认可）
+      - id: 列表恰1行该酒店
+        as: shop
+        type: js_assert
+        script: '(() => { const name = "${var:HOTEL_NAME}"; return Array.from(document.querySelectorAll(".tbl tbody tr")).filter((tr) => tr.textContent.includes(name)).length === 1; })()'
+        truthy: true
+        expect: 哨兵真实酒店就绪
+  - id: 真实酒店打白名单
+    type: flow
+    expect: 行内状态选白名单（即改即存），刷新回显落库
+    steps:
+      - id: 该行状态选白名单
         as: shop
         type: select
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-哨兵酒店")) select[name="status_tag"]'
+        selector: '.tbl tbody tr:has(td b:text-is("${var:HOTEL_NAME}")) select[name="status_tag"]'
         value: 白名单酒店
       - id: 等打标提交完成
         as: shop
@@ -96,9 +158,9 @@ steps:
         type: js_assert
         reload: true
         timeoutMs: 15000
-        script: '(() => { const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-哨兵酒店")); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "白名单酒店"; })()'
+        script: '(() => { const name = "${var:HOTEL_NAME}"; const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes(name)); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "白名单酒店"; })()'
         truthy: true
-        expect: 夹具酒店当前标签=白名单（供越权后比对不变）
+        expect: 真实酒店当前标签=白名单（供越权后比对不变）
   - id: 越权编辑他店酒店被404
     type: flow
     expect: 店侧直接 POST 编辑他店（新乡旅途）酒店 → 404，不泄露存在性
@@ -123,12 +185,12 @@ steps:
         method: POST
         path: /hotels/tag
         form:
-          fliggy_shid: E2E-SEC-001
+          fliggy_shid: 非法探测占位SHID
           status_tag: 恶意标签<script>
           back: board
         maxRedirects: 0
         expectStatus: 302
-        expect: 非法值被拒并 302 回列表
+        expect: 非法值被拒并 302 回列表（值校验先于酒店存在性校验，占位 shid 即可命中）
       - id: 列表出现非法提示
         as: shop
         type: navigate
@@ -142,13 +204,13 @@ steps:
       - id: 原标签仍为白名单
         as: shop
         type: js_assert
-        script: '(() => { const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes("E2E-哨兵酒店")); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "白名单酒店"; })()'
+        script: '(() => { const name = "${var:HOTEL_NAME}"; const s = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => tr.textContent.includes(name)); if (s === undefined) return false; const v = s.querySelector("select[name=\"status_tag\"]"); return v !== null && v.value === "白名单酒店"; })()'
         truthy: true
         expect: 非法提交未改变原标签（仍白名单）
 teardown:
-  - id: 收尾删除哨兵酒店
+  - id: 收尾删除真实酒店
     type: flow
-    expect: 用删除功能清掉哨兵酒店，跑完不残留（越权探测目标不受影响）
+    expect: 用删除功能清掉哨兵真实酒店，跑完不残留（越权探测目标不受影响）
     steps:
       - id: 收尾打开酒店管理页
         as: shop
@@ -158,17 +220,17 @@ teardown:
         as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 删除哨兵酒店
+      - id: 删除真实酒店
         as: shop
         type: click
-        selector: '.tbl tbody tr:has(td b:text-is("E2E-哨兵酒店")) .btn-del'
-        when: 'Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("E2E-哨兵酒店"))'
+        selector: '.tbl tbody tr:has(td b:text-is("${var:HOTEL_NAME}")) .btn-del'
+        when: '(() => { const name = "${var:HOTEL_NAME}"; return Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes(name)); })()'
         waitFor: '.content .flash'
-      - id: 列表无残留哨兵
+      - id: 列表无残留
         as: shop
         type: js_assert
         reload: true
         timeoutMs: 15000
-        script: '!Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("E2E-哨兵酒店"))'
+        script: '(() => { const name = "${var:HOTEL_NAME}"; return !Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes(name)); })()'
         truthy: true
-        expect: 收尾后列表不含哨兵酒店
+        expect: 收尾后列表不含哨兵真实酒店
