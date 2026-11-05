@@ -1,42 +1,52 @@
-import type { RunResult, StepResult } from '../runner/types.js';
+import type { RunResult, StepResult } from "../runner/types.js";
 
 const esc = (s: string): string =>
-	s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 
 const STATUS_ZH: Record<string, string> = {
-	passed: '通过',
-	failed: '失败',
-	needs_review: '待人工复核',
-	skipped: '跳过',
-	warned: '警告',
-	running: '执行中',
+  passed: "通过",
+  failed: "失败",
+  needs_review: "待人工复核",
+  skipped: "跳过",
+  warned: "警告",
+  running: "执行中",
 };
 
 export const statusZh = (s: string): string => STATUS_ZH[s] ?? s;
 
 function badge(status: string): string {
-	return `<span class="b b-${esc(status)}">${esc(statusZh(status))}</span>`;
+  return `<span class="b b-${esc(status)}">${esc(statusZh(status))}</span>`;
 }
 
 function stepRow(st: StepResult, i: number): string {
-	const attempts = st.attempts
-		.map((a) => `<div class="att">#${a.n} ${a.ok ? '成功' : '失败'} ${a.ms}ms${a.error ? ` — ${esc(a.error)}` : ''}</div>`)
-		.join('');
-	const asserts = st.assertions
-		.map(
-			(a) =>
-				`<tr><td>${esc(a.type)}</td><td><span class="tag tag-${a.kind}">${a.kind === 'det' ? '确定性' : 'AI'}</span></td><td>${esc(a.expectedText)}</td><td class="mut">${esc(a.actualText)}</td><td>${a.ok ? '✓' : '✗'}</td></tr>`,
-		)
-		.join('');
-	const shots = st.shots
-		.map((f, n) => `<figure><img src="${esc(f)}" alt="step ${i + 1} shot ${n + 1}" loading="lazy"><figcaption>${esc(f)}</figcaption></figure>`)
-		.join('');
-	return `<section class="step st-${esc(st.status)}" id="s${i}">
-<details open><summary><span class="idx">${String(i + 1).padStart(2, '0')}</span> <b>${esc(st.stepId)}</b> <span class="mut">${esc(st.type)} · 角色 ${esc(st.actor)} · ${st.ms}ms</span> ${badge(st.status)}</summary>
-${st.expect ? `<p class="accept">验收点：${esc(st.expect)}</p>` : ''}
-${st.error ? `<p class="err">${esc(st.error)}</p>` : ''}
+  const attempts = st.attempts
+    .map(
+      (a) =>
+        `<div class="att">#${a.n} ${a.ok ? "成功" : "失败"} ${a.ms}ms${a.error ? ` — ${esc(a.error)}` : ""}</div>`,
+    )
+    .join("");
+  const asserts = st.assertions
+    .map(
+      (a) =>
+        `<tr><td>${esc(a.type)}</td><td><span class="tag tag-${a.kind}">${a.kind === "det" ? "确定性" : "AI"}</span></td><td>${esc(a.expectedText)}</td><td class="mut">${esc(a.actualText)}</td><td>${a.ok ? "✓" : "✗"}</td></tr>`,
+    )
+    .join("");
+  const shots = st.shots
+    .map(
+      (f, n) =>
+        `<figure><figcaption>${esc(f)}</figcaption><img src="${esc(f)}" alt="step ${i + 1} shot ${n + 1}" loading="lazy"></figure>`,
+    )
+    .join("");
+  return `<section class="step st-${esc(st.status)}" id="s${i}">
+<details open><summary><span class="idx">${String(i + 1).padStart(2, "0")}</span> <b>${esc(st.stepId)}</b> <span class="mut">${esc(st.type)} · 角色 ${esc(st.actor)} · ${st.ms}ms</span> ${badge(st.status)}</summary>
+${st.expect ? `<p class="accept">验收点：${esc(st.expect)}</p>` : ""}
+${st.error ? `<p class="err">${esc(st.error)}</p>` : ""}
 ${attempts}
-${asserts ? `<table><tr><th>断言</th><th>类型</th><th>预期</th><th>实际</th><th>结果</th></tr>${asserts}</table>` : ''}
+${asserts ? `<table><tr><th>断言</th><th>类型</th><th>预期</th><th>实际</th><th>结果</th></tr>${asserts}</table>` : ""}
 <div class="shots">${shots}</div>
 </details></section>`;
 }
@@ -50,13 +60,20 @@ function localTime(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-export function renderReport(r: RunResult, warnings: readonly string[] = []): string {
-	const det = r.steps.flatMap((s) => s.assertions).filter((a) => a.kind === 'det');
-	const ai = r.steps.flatMap((s) => s.assertions).filter((a) => a.kind === 'ai');
-	const warnHtml = warnings.length
-		? `<div class="warnbox">${warnings.map((w) => `<div>⚠ ${esc(w)}</div>`).join('')}</div>`
-		: '';
-	return `<!doctype html>
+export function renderReport(
+  r: RunResult,
+  warnings: readonly string[] = [],
+): string {
+  const det = r.steps
+    .flatMap((s) => s.assertions)
+    .filter((a) => a.kind === "det");
+  const ai = r.steps
+    .flatMap((s) => s.assertions)
+    .filter((a) => a.kind === "ai");
+  const warnHtml = warnings.length
+    ? `<div class="warnbox">${warnings.map((w) => `<div>⚠ ${esc(w)}</div>`).join("")}</div>`
+    : "";
+  return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TestForge ${esc(r.scenarioName)} ${esc(r.runId)}</title>
@@ -88,7 +105,7 @@ th{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em
 .tag-det{color:var(--ok);border-color:var(--ok)}.tag-ai{color:var(--rev);border-color:var(--rev)}
 .shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;padding:12px 14px 0}
 .shots img{width:100%;border:1px solid var(--line);border-radius:4px;background:#fff}
-.shots figcaption{font-size:11px;color:var(--mut);margin-top:2px;overflow-wrap:anywhere}
+.shots figcaption{font-size:11px;color:var(--mut);margin-bottom:2px;overflow-wrap:anywhere}
 .warnbox{background:var(--warn-bg);border:1px solid #f0cf9a;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:13px}
 @media (max-width:600px){.shots{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
@@ -101,7 +118,7 @@ th{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em
 <span>警告 <b>${r.warnings.length + warnings.length}</b></span>
 </div>
 ${warnHtml}
-${r.steps.map(stepRow).join('')}
+${r.steps.map(stepRow).join("")}
 <p class="meta">TestForge · trace-*.zip 与 summary.json 在同目录</p>
 </div></body></html>`;
 }
