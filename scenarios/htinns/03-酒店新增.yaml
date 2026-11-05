@@ -1,88 +1,25 @@
-# 场景三：酒店管理——新增单个酒店（信科同步回填）
-# 主线：建 E2E 店并配信科凭证（XK_COOKIE / 平台ID 499，与凭证账号配对）→ 店侧登录 →
+# 场景三 v3：酒店新增（信科同步回填）—— 数据纪律：复用固定夹具店，不新增店铺
+# 夹具店 E2E-酒店-1105-160709（shop_id=124，初始密码 123456），收尾用删除功能清掉测试酒店
+# 链路：基线登录 → 配信科凭证（XK_COOKIE / 平台ID 499，与凭证账号配对）→
 #       弹窗新增酒店（名称取环境变量 HOTEL_NAME，信科平台真实在线酒店）→
-#       点信科同步 → 断言字段回填 → 保存
-# 重复性：源码是 upsert 语义（同店+同SHID/同名 → 更新既有记录），
-#         故第二次保存应提示「已更新既有酒店」且列表行数仍为 1，不产生重复行
+#       点信科同步 → 断言字段回填 → 保存 → 再来一遍验证 upsert 幂等 → 收尾自删
 # 拍图口径：同步环节与保存环节分开，使「弹窗回填画面」成为同步环节的结束帧
 name: 酒店新增与信科同步
-description: 对应用户场景 3；验证新增酒店弹窗的信科同步回填与 upsert 幂等
-version: 2
+description: 对应用户场景 3；验证新增酒店弹窗的信科同步回填与 upsert 幂等（复用夹具店，收尾自动清理）
+version: 3
 trace: false
 requires:
   env: [XK_COOKIE, HOTEL_NAME]
 variables:
-  shopName: "E2E-酒店-${var:RUN_STAMP}"
-  shopUser: "e2ehtl_${var:RUN_DATE}${var:RUN_TIME}"
+  shopUser: "e2ehtl_20261105160709"
 actors:
-  admin:
-    description: 管理员
-    dialogs: accept
   shop:
-    description: E2E 测试店铺身份
+    description: 夹具店铺身份（E2E-酒店-1105-160709）
     dialogs: accept
 steps:
-  - id: 管理员登录并新增E2E店
-    type: flow
-    expect: admin 登录成功并创建 E2E 测试店
-    steps:
-      - id: admin打开登录页
-        as: admin
-        type: navigate
-        url: /login
-      - id: admin填写账号
-        as: admin
-        type: fill
-        selector: 'input[name="username"]'
-        value: ${var:ADMIN_USER}
-      - id: admin填写密码
-        as: admin
-        type: fill
-        selector: 'input[name="password"]'
-        value: ${var:ADMIN_PW}
-      - id: admin提交登录
-        as: admin
-        type: click
-        selector: 'form button[type="submit"]'
-      - id: admin登录成功
-        as: admin
-        type: wait
-        selector: '.topbar .usermenu'
-      - id: 打开店铺配置页
-        as: admin
-        type: navigate
-        url: /settings/shop
-      - id: 等店铺列表加载
-        as: admin
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 点击增加店铺
-        as: admin
-        type: click
-        selector: '#btn-add-shop'
-        waitFor: '#adddlg[open]'
-      - id: 填写店铺名
-        as: admin
-        type: fill
-        selector: '#adddlg input[name="name"]'
-        value: ${var:shopName}
-      - id: 填写店铺账号
-        as: admin
-        type: fill
-        selector: '#adddlg input[name="username"]'
-        value: ${var:shopUser}
-      - id: 保存新店
-        as: admin
-        type: click
-        selector: '#adddlg button.btn'
-      - id: E2E店创建成功
-        as: admin
-        type: dom_assert
-        selector: '.content .flash'
-        contains: 已创建
   - id: 店侧基线登录
     type: flow
-    expect: E2E 店账号可正常登录（基线）
+    expect: 夹具店账号可正常登录（基线）
     steps:
       - id: 店铺账号打开登录页
         as: shop
@@ -188,18 +125,18 @@ steps:
         expect: 飞猪 SHID/HID 经平台映射补全（shopid=499 配对正确时应非空）
   - id: 保存新增酒店
     type: flow
-    expect: 保存成功提示「已新增酒店」，列表出现该酒店且恰 1 行
+    expect: 保存成功（新增或 upsert 更新均认可），列表出现该酒店且恰 1 行
     steps:
       - id: 点击保存
         as: shop
         type: click
         selector: '#hotelform button[type="submit"]'
-      - id: flash提示已新增酒店
+      - id: flash提示保存成功
         as: shop
-        type: dom_assert
-        selector: '.content .flash'
-        contains: 已新增酒店
-        expect: 保存成功提示已新增
+        type: js_assert
+        script: '/(已新增酒店|已更新既有酒店)/.test((document.querySelector(".content .flash") || { textContent: "" }).textContent)'
+        truthy: true
+        expect: 保存成功（首次新增；若上次收尾失败有残留则 upsert 更新，均认可）
       - id: 列表恰有1行该酒店
         as: shop
         type: js_assert
@@ -250,25 +187,29 @@ steps:
         truthy: true
         expect: 重复添加后仍只有 1 行（幂等）
 teardown:
-  - id: 收尾停用E2E店留档
+  - id: 收尾删除夹具酒店
     type: flow
-    expect: E2E 店若仍在营则停用留档
+    expect: 用删除功能清掉测试酒店，跑完店铺酒店列表为空（不残留数据）
     steps:
-      - id: 收尾等登录完成
-        as: admin
-        type: wait
-        selector: '.topbar .usermenu'
-      - id: 收尾打开店铺配置页
-        as: admin
+      - id: 收尾打开酒店管理页
+        as: shop
         type: navigate
-        url: /settings/shop
+        url: /hotels
       - id: 收尾等列表加载
-        as: admin
+        as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 停用E2E店留档（仅当仍在营）
-        as: admin
+      - id: 删除夹具酒店
+        as: shop
         type: click
-        selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
-        when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
-        onFail: warn
+        selector: '.tbl tbody tr:has(td b:text-is("${var:HOTEL_NAME}")) .btn-del'
+        when: '(() => { const name = "${var:HOTEL_NAME}"; return Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes(name)); })()'
+        waitFor: '.content .flash'
+      - id: 列表无残留夹具
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 15000
+        script: '!Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("${var:HOTEL_NAME}"))'
+        truthy: true
+        expect: 收尾后列表不含测试酒店（下次运行从空店重建）

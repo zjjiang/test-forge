@@ -1,86 +1,26 @@
-# 场景四：批量导入 Excel（真实酒店名 + 信科为准）+ 任务进度页验证
-# 数据管理：Excel 路径放项目变量 IMPORT_XLSX；10 行是信科账号内实测可搜到且有飞猪映射的真实酒店
+# 场景四 v4：批量导入 Excel（真实酒店名 + 信科为准）+ 任务进度页验证
+# 数据纪律：复用固定夹具店 E2E-批量-1105-160745（shop_id=125，初始密码 123456），不新增店铺；
+#           Excel 路径放项目变量 IMPORT_XLSX；10 行是信科账号内实测可搜到且有飞猪映射的真实酒店
 # 关键口径（源码 _fetch_row）：店铺有信科凭证 → 逐行走信科搜索、信科数据为准（Excel 名字仅作关键字）；
 #           无凭证 → Excel 列原样入库。本场景配置凭证，走生产同款信科链路（每行限速 0.5s）
-# 链路：配凭证 → 批量弹窗上传 → flash 任务已创建 → /tasks 刷新轮询已完成 10/10（reload:true）→ 列表 10 行
+# 链路：基线登录 → 配凭证 → 批量弹窗上传 → flash 任务已创建 → /tasks 刷新轮询已完成 10/10（reload:true）
+#       → 列表 10 行 → 收尾用删除功能逐行清空夹具酒店（下次运行从空店重建）
 name: 批量导入Excel与任务进度
-description: 对应用户场景 4；批量上传 10 家真实酒店（信科为准），验证后台任务链路与任务界面
-version: 3
+description: 对应用户场景 4；批量上传 10 家真实酒店（信科为准），验证后台任务链路与任务界面（复用夹具店，收尾自动清理）
+version: 4
 trace: false
 requires:
   env: [IMPORT_XLSX, XK_COOKIE]
 variables:
-  shopName: "E2E-批量-${var:RUN_STAMP}"
-  shopUser: "e2ebat_${var:RUN_DATE}${var:RUN_TIME}"
+  shopUser: "e2ebat_20261105160745"
 actors:
-  admin:
-    description: 管理员
-    dialogs: accept
   shop:
-    description: E2E 测试店铺身份
+    description: 夹具店铺身份（E2E-批量-1105-160745）
     dialogs: accept
 steps:
-  - id: 管理员登录并新增E2E店
-    type: flow
-    expect: admin 登录成功并创建 E2E 测试店
-    steps:
-      - id: admin打开登录页
-        as: admin
-        type: navigate
-        url: /login
-      - id: admin填写账号
-        as: admin
-        type: fill
-        selector: 'input[name="username"]'
-        value: ${var:ADMIN_USER}
-      - id: admin填写密码
-        as: admin
-        type: fill
-        selector: 'input[name="password"]'
-        value: ${var:ADMIN_PW}
-      - id: admin提交登录
-        as: admin
-        type: click
-        selector: 'form button[type="submit"]'
-      - id: admin登录成功
-        as: admin
-        type: wait
-        selector: '.topbar .usermenu'
-      - id: 打开店铺配置页
-        as: admin
-        type: navigate
-        url: /settings/shop
-      - id: 等店铺列表加载
-        as: admin
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 点击增加店铺
-        as: admin
-        type: click
-        selector: '#btn-add-shop'
-        waitFor: '#adddlg[open]'
-      - id: 填写店铺名
-        as: admin
-        type: fill
-        selector: '#adddlg input[name="name"]'
-        value: ${var:shopName}
-      - id: 填写店铺账号
-        as: admin
-        type: fill
-        selector: '#adddlg input[name="username"]'
-        value: ${var:shopUser}
-      - id: 保存新店
-        as: admin
-        type: click
-        selector: '#adddlg button.btn'
-      - id: E2E店创建成功
-        as: admin
-        type: dom_assert
-        selector: '.content .flash'
-        contains: 已创建
   - id: 店侧基线登录
     type: flow
-    expect: E2E 店账号可正常登录（基线）
+    expect: 夹具店账号可正常登录（基线）
     steps:
       - id: 店铺账号打开登录页
         as: shop
@@ -208,7 +148,7 @@ steps:
         expect: 任务列表有记录
   - id: 列表验证10家酒店
     type: flow
-    expect: 信科为准入库后，新店列表恰 10 行在营酒店
+    expect: 信科为准入库后，夹具店列表恰 10 行在营酒店
     steps:
       - id: 回到酒店管理页
         as: shop
@@ -221,35 +161,147 @@ steps:
       - id: KPI在营10家
         as: shop
         type: js_assert
+        reload: true
+        timeoutMs: 180000
         script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("10"); })()'
         truthy: true
-        expect: 在营酒店 KPI 为 10
+        expect: 在营酒店 KPI 为 10（reload 轮询等后台导入完成——夹具店复用后 /tasks 有历史任务，不能以任务页为准）
       - id: 列表恰10行
         as: shop
         type: js_assert
+        reload: true
+        timeoutMs: 180000
         script: 'document.querySelectorAll(".tbl tbody tr").length === 10'
         truthy: true
-        expect: 新店导入后列表恰 10 行（真实酒店名，信科数据为准）
+        expect: 导入完成后列表恰 10 行（真实酒店名，信科数据为准）
 teardown:
-  - id: 收尾停用E2E店留档
+  - id: 收尾清空夹具酒店
     type: flow
-    expect: E2E 店若仍在营则停用留档
+    expect: 用删除功能逐行清空导入的酒店，跑完店铺酒店列表为空（不残留数据）
     steps:
-      - id: 收尾等登录完成
-        as: admin
-        type: wait
-        selector: '.topbar .usermenu'
-      - id: 收尾打开店铺配置页
-        as: admin
+      - id: 收尾打开酒店管理页
+        as: shop
         type: navigate
-        url: /settings/shop
+        url: /hotels
       - id: 收尾等列表加载
-        as: admin
+        as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 停用E2E店留档（仅当仍在营）
-        as: admin
+      - id: 收尾删除第01家
+        as: shop
         type: click
-        selector: '.tbl tbody tr:has(td b:text-is("${var:shopName}")) .btn-toggle'
-        when: '(() => { const name = "${var:shopName}"; const row = Array.from(document.querySelectorAll(".tbl tbody tr")).find((tr) => ((tr.querySelector("td b") || { textContent: "" }).textContent || "").trim() === name); return ((row || {}).querySelector ? (row.querySelector(".pill") || { textContent: "" }).textContent : "").trim() === "在营"; })()'
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
         onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第02家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第03家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第04家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第05家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第06家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第07家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第08家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第09家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第10家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾列表清空
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 15000
+        script: 'document.querySelectorAll(".tbl tbody tr .btn-del").length === 0 && !Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.querySelector("td b"))'
+        truthy: true
+        expect: 收尾后无可删除酒店（空列表页有「该店暂无酒店配置」占位行，故按无 b 名称行断言；下次运行从空店重建 10 行）
