@@ -3,8 +3,9 @@
 #           Excel 路径放项目变量 IMPORT_XLSX；10 行是信科账号内实测可搜到且有飞猪映射的真实酒店
 # 关键口径（源码 _fetch_row）：店铺有信科凭证 → 逐行走信科搜索、信科数据为准（Excel 名字仅作关键字）；
 #           无凭证 → Excel 列原样入库。本场景配置凭证，走生产同款信科链路（每行限速 0.5s）
-# 链路：基线登录 → 配凭证 → 批量弹窗上传 → flash 任务已创建 → /tasks 刷新轮询已完成 10/10（reload:true）
-#       → 列表 10 行 → 收尾用删除功能逐行清空夹具酒店（下次运行从空店重建）
+# 链路：基线登录 → 配凭证 → 批量弹窗上传 → flash 任务已创建 → /tasks 刷新轮询首行（本次任务）
+#       已完成 10/10（reload:true，只认首行避免历史任务假阳性）→ 列表 10 行
+#       → 收尾用删除功能逐行清空夹具酒店（下次运行从空店重建）
 name: 批量导入Excel与任务进度
 description: 对应用户场景 4；批量上传 10 家真实酒店（信科为准），验证后台任务链路与任务界面（复用夹具店，收尾自动清理）
 version: 4
@@ -122,7 +123,7 @@ steps:
         expect: 解析出全部 10 行
   - id: 任务进度页验证
     type: flow
-    expect: /tasks 页出现本店「酒店导入」任务，刷新轮询到「已完成 10/10」（信科逐行限速）
+    expect: /tasks 页首行（最新任务=本次运行）翻转为「已完成 10/10」，环节截图即任务创建成功证据
     steps:
       - id: 打开任务进度页
         as: shop
@@ -135,11 +136,11 @@ steps:
       - id: 导入任务已完成10行
         as: shop
         type: js_assert
-        timeoutMs: 180000
+        timeoutMs: 600000
         reload: true
-        script: '(() => { return Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.textContent.includes("酒店导入") && tr.textContent.includes("已完成") && tr.textContent.includes("10/10")); })()'
+        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("酒店导入") && tr.textContent.includes("已完成") && tr.textContent.includes("10/10"); })()'
         truthy: true
-        expect: 任务状态翻转为已完成且完成数 10/10（reload 轮询捕捉后台进度）
+        expect: 最新一行（=本次运行的任务，表按创建时间倒序）翻转为已完成 10/10——只认首行，避免被历史任务行骗过；该环节总结截图即任务创建成功证据
       - id: 环节结束帧=任务页
         as: shop
         type: js_assert

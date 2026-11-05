@@ -173,10 +173,38 @@ steps:
         script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return document.querySelectorAll(".tbl tbody tr").length === 10 && card !== undefined && card.textContent.includes("10"); })()'
         truthy: true
         expect: 补导后列表恰 10 行在营（已满 10 行则本环节直接通过）
+  - id: 任务进度留痕
+    type: flow
+    expect: /tasks 页最新一行（=本次导入任务，表按创建时间倒序）状态已完成，环节总结截图即任务创建成功的留痕证据
+    steps:
+      - id: 打开任务进度页
+        as: shop
+        type: navigate
+        url: /tasks
+      - id: 等任务表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 最新导入任务已完成
+        as: shop
+        type: js_assert
+        timeoutMs: 600000
+        reload: true
+        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("酒店导入") && tr.textContent.includes("已完成"); })()'
+        truthy: true
+        expect: 首行（本次任务）已完成——只认首行，夹具店复用后历史任务行不参与判定
   - id: 搜索与分页计数
     type: flow
     expect: 关键字搜索恰命中「连云港海州湾voco酒店」一家；清空后计数条「共 10 家 · 第 1 / 1 页」
     steps:
+      - id: 回酒店管理页再搜索
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等搜索页列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
       - id: 搜索框填真实酒店名
         as: shop
         type: fill
@@ -275,6 +303,10 @@ steps:
         type: select
         selector: '.tbl tbody tr:has(td b:text-is("连云港海州湾voco酒店")) select[name="ratio_tier"]'
         value: 高
+      - id: 等打标刷新完成
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
       - id: 优质筛选恰命中该酒店
         as: shop
         type: navigate
