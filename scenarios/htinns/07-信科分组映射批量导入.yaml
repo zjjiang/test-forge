@@ -1,0 +1,248 @@
+# 场景七：价格维护 · 信科分组映射 Excel 批量导入（参考老平台 handlers.py:561-571 同语义）
+# 页面：/maintain/config（信科分组映射，xk_rate_config 表）
+# 数据纪律：复用固定夹具店 E2E-批量-1105-160745（shop_id=125，初始密码 123456），不新增店铺；
+#           xlsx 行数据取自生产库 shop 10 的真实 rate→tag_id 映射（不是编造值）；
+#           夹具目录放项目变量 RATEMAP_ASSETS（路径即配置，换文件=换数据）
+# 关键口径（源码 ratemap.py import_xlsx）：
+#           ① 表头必须恰为 rate/tag_id/is_active，否则整文件拒绝（「导入失败：表头须为…」）
+#           ② 导入 = 整店替换（先删后插单事务），不是追加——任一行非法（如 tag_id 空）整体拒绝、旧数据不破坏
+#           ③ 列表按 id 倒序 → 最后导入的一行显示在最上（首行断言用文件末行）
+# 链路：基线登录 → 配置页基线 → 导入 5 行 → 列表恰 5 行（首行=文件末行 -31/4897）
+#       → 再导入 3 行验证整店替换（恰 3 行、旧行消失）→ 非法表头拒绝且数据不破坏
+#       → 导出 xlsx 落盘 → 收尾导入空表清空（导入完成：0 行，店铺映射为空）
+name: 信科分组映射批量导入
+module: 价格维护
+description: 对应用户场景 7；价格维护配置页 xlsx 批量导入——表头校验、整店替换、失败不破坏、导出落盘（复用夹具店，收尾清空映射）
+version: 1
+trace: false
+requires:
+  env: [RATEMAP_ASSETS]
+variables:
+  shopUser: "e2ebat_20261105160745"
+actors:
+  shop:
+    description: 夹具店铺身份（E2E-批量-1105-160745）
+    dialogs: accept
+steps:
+  - id: 店侧基线登录
+    type: flow
+    expect: 夹具店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 打开配置页基线
+    type: flow
+    expect: /maintain/config 信科分组映射页可打开，表格渲染（基线映射数不限——整店替换语义使起点无关）
+    steps:
+      - id: 打开信科分组映射页
+        as: shop
+        type: navigate
+        url: /maintain/config
+      - id: 等映射表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 基线映射为空
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 15000
+        onFail: warn
+        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("暂无映射"); })()'
+        truthy: true
+        expect: 基线店内无映射（warn 不作门禁：上次运行残留会被整店替换覆盖，不影响后续断言）
+  - id: 批量导入5行真实映射
+    type: flow
+    expect: 批量添加弹窗上传 5 行真实映射 xlsx，flash 导入完成：5 行
+    steps:
+      - id: 点击批量添加
+        as: shop
+        type: click
+        selector: '#btn-batch'
+        waitFor: '#importdlg[open]'
+        expect: 打开批量添加 Excel 弹窗（提示整店替换）
+      - id: 上传5行映射Excel
+        as: shop
+        type: upload
+        selector: '#importdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/ratemap-import-5.xlsx
+        expect: 选择 5 行真实映射 xlsx（rate -35~-31 → tag 4901~4897，取自生产 shop 10）
+      - id: 提交导入
+        as: shop
+        type: click
+        selector: '#importdlg button[type="submit"]'
+      - id: flash导入完成5行
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("导入完成") && t.includes("5 行"); })()'
+        truthy: true
+        expect: flash 提示导入完成且行数为 5
+  - id: 列表验证5行真实映射
+    type: flow
+    expect: 导入后列表恰 5 行，首行（=文件末行，id 倒序）为 -31/4897，全部启用
+    steps:
+      - id: 列表恰5行
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: 'document.querySelectorAll(".tbl tbody tr").length === 5'
+        truthy: true
+        expect: 映射列表恰 5 行
+      - id: 首行为文件末行
+        as: shop
+        type: js_assert
+        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("-31") && tr.textContent.includes("4897"); })()'
+        truthy: true
+        expect: 首行比例 -31、tag_id 4897（列表按 id 倒序，最后导入的行在最上——证明按文件顺序逐行插入）
+      - id: 全部为启用状态
+        as: shop
+        type: js_assert
+        script: '(() => { const pills = Array.from(document.querySelectorAll(".tbl tbody tr .pill")); return pills.length === 5 && pills.every((p) => p.textContent.includes("启用")); })()'
+        truthy: true
+        expect: 5 行状态徽标全部「启用」（is_active=1 原样落库；不能按操作按钮文字判断——启用行的按钮恰好显示「停用」）
+  - id: 整店替换再导入3行
+    type: flow
+    expect: 再导入 3 行不同映射后列表恰 3 行、旧 5 行消失——导入是整店替换不是追加（老平台同语义）
+    steps:
+      - id: 再次点击批量添加
+        as: shop
+        type: click
+        selector: '#btn-batch'
+        waitFor: '#importdlg[open]'
+      - id: 上传3行映射Excel
+        as: shop
+        type: upload
+        selector: '#importdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/ratemap-import-3.xlsx
+        expect: 选择 3 行不同映射 xlsx（rate 100/20/19 → tag 5134/4912/4911，取自生产 shop 10）
+      - id: 再次提交导入
+        as: shop
+        type: click
+        selector: '#importdlg button[type="submit"]'
+      - id: flash导入完成3行
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("导入完成") && t.includes("3 行"); })()'
+        truthy: true
+        expect: flash 提示导入完成且行数为 3
+      - id: 替换后恰3行
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: 'document.querySelectorAll(".tbl tbody tr").length === 3'
+        truthy: true
+        expect: 替换后列表恰 3 行（不是 5+3=8 行追加）
+      - id: 旧映射已全部消失
+        as: shop
+        type: js_assert
+        script: '(() => { const t = document.querySelector(".tblwrap table.tbl").textContent; return t.includes("5134") && t.includes("4912") && !t.includes("4901") && !t.includes("4897"); })()'
+        truthy: true
+        expect: 新 3 行在列、旧 tag（4901/4897）全部消失——先删后插的整店替换语义
+  - id: 非法表头拒绝且数据不破坏
+    type: flow
+    expect: 错表头 xlsx 整文件拒绝（flash 导入失败：表头须为…），已有 3 行数据原样保留
+    steps:
+      - id: 第三次点击批量添加
+        as: shop
+        type: click
+        selector: '#btn-batch'
+        waitFor: '#importdlg[open]'
+      - id: 上传错表头Excel
+        as: shop
+        type: upload
+        selector: '#importdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/ratemap-badheader.xlsx
+        expect: 选择表头为「比例/分组/启停」的非法 xlsx
+      - id: 提交非法导入
+        as: shop
+        type: click
+        selector: '#importdlg button[type="submit"]'
+      - id: flash导入失败表头
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("导入失败") && t.includes("表头须为"); })()'
+        truthy: true
+        expect: flash 提示导入失败且指出表头必须为 rate/tag_id/is_active
+      - id: 原数据未被破坏
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: '(() => { const trs = document.querySelectorAll(".tbl tbody tr"); return trs.length === 3 && document.querySelector(".tblwrap table.tbl").textContent.includes("5134"); })()'
+        truthy: true
+        expect: 拒绝后列表仍为原 3 行——非法文件先解析后删插，旧数据零破坏（整店替换的安全边界）
+  - id: 导出xlsx落盘
+    type: flow
+    expect: 导出按钮落盘 xk_rate_config_shop125.xlsx（rate/tag_id/is_active 三列）
+    steps:
+      - id: 点击导出映射
+        as: shop
+        type: download
+        click: 'a.chip[href*="export"]'
+        namePrefix: xk_rate_config_shop125
+        nameSuffix: .xlsx
+        expect: 导出文件下载成功（文件名含店号，可直接回导——导出/导入闭环）
+teardown:
+  - id: 收尾导入空表清空映射
+    type: flow
+    expect: 导入仅表头的空 xlsx 清空全店映射（导入完成：0 行），跑完店铺映射为空（不残留数据）
+    steps:
+      - id: 收尾打开配置页
+        as: shop
+        type: navigate
+        url: /maintain/config
+      - id: 收尾等表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾点击批量添加
+        as: shop
+        type: click
+        selector: '#btn-batch'
+        waitFor: '#importdlg[open]'
+      - id: 收尾上传空表Excel
+        as: shop
+        type: upload
+        selector: '#importdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/ratemap-empty.xlsx
+        expect: 选择仅表头的空 xlsx（合法文件，0 数据行）
+      - id: 收尾提交导入
+        as: shop
+        type: click
+        selector: '#importdlg button[type="submit"]'
+      - id: 收尾flash导入0行
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("导入完成") && t.includes("0 行"); })()'
+        truthy: true
+        expect: flash 提示导入完成：0 行（整店替换为空）
+      - id: 收尾列表已清空
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("暂无映射"); })()'
+        truthy: true
+        expect: 列表回到「暂无映射」占位——下次运行从空店重建

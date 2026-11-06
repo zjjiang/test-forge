@@ -1,0 +1,362 @@
+# 场景八：价格维护 · ① 筛选（信科底价）——10 家真实酒店批量筛选
+# 页面：/maintain/filter（价格维护执行页：发起任务弹窗 + 本工序最近任务表）
+# 数据纪律：复用固定夹具店 E2E-批量-1105-160745（shop_id=125，密码 123456）；
+#           筛选对象 = 10 家真实酒店：北京瑞麟湾温泉度假酒店（信科实测有
+#           「直签+供应商开票」产品，2026-11-06 29 家广测唯一命中）+ 原
+#           batch-import-10.xlsx 名单取 9 家（广测均无该类产品，作「无有效
+#           底价」对照），与场景 04 名单同源、upsert 幂等；
+#           先导入本店再筛选——resolve_rows 只匹配本店 hotel_config
+# 关键口径（源码 filter_operator.py / maintain_views._run_op）：
+#           ① 无信科凭证 400——先配凭证（xk_shop_id 499 + XK_COOKIE）
+#           ② Excel 必含「酒店名称」列；未匹配行不静默丢（本版 10 行全匹配，
+#              flash 无「未匹配」后缀）
+#           ③ 逐家信科取底价进缓存（限速 0.5s），置信度 high=直连 / cached=缓存
+#           ④ 任务类型 hotel_filter，标签「① 筛选（信科底价）」；完成后产物
+#              task_<id>_result.csv，任务页「下载明细」可取
+#           ⑤ 标签过滤严格口径（2026-11-06 用户拍板）：仅保留 span 同时含
+#              「直签」+「供应商开票」的行。解析器工作正常（瑞麟湾筛出 6 房型）；
+#              多数酒店直签行标「酒店开票」故「解析后无有效底价」是正确业务结果
+#           ⑥ 底价随信科实时波动——断言任务计数与明细结构，不断言具体金额
+# 链路：基线登录 → 配凭证 → 导入 10 家真实酒店（列表恰 10 行）
+#       → 筛选页发起任务（Excel 10 行，全匹配无未匹配）
+#       → /tasks 首行（本次任务）翻转为已完成 成功 1 / 失败 9（只认首行）
+#       → 下载筛选明细 CSV（首行下载链接，表头校验）→ 筛选页留痕（首行已完成 1/10）
+#       → 收尾逐行删除 10 家酒店（店铺酒店清空，不残留）
+name: 信科底价筛选
+module: 价格维护
+description: 对应用户场景 8；价格维护①筛选——10 家真实酒店批量筛选，1 家筛出底价（瑞麟湾）+ 9 家无有效底价对照，任务进度与明细 CSV 留痕（复用夹具店，收尾清空酒店）
+version: 2
+trace: false
+requires:
+  env: [RATEMAP_ASSETS, XK_COOKIE]
+variables:
+  shopUser: "e2ebat_20261105160745"
+actors:
+  shop:
+    description: 夹具店铺身份（E2E-批量-1105-160745）
+    dialogs: accept
+steps:
+  - id: 店侧基线登录
+    type: flow
+    expect: 夹具店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 店侧配置信科凭证
+    type: flow
+    expect: 本店信科平台 ID（499）与 Cookie（XK_COOKIE）保存成功——筛选取底价的前置（无凭证 400）
+    steps:
+      - id: 打开店铺配置页
+        as: shop
+        type: navigate
+        url: /settings/shop
+      - id: 等本店行加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 打开本店编辑弹窗
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-edit'
+        waitFor: '#editdlg[open]'
+      - id: 填写信科店铺ID
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_shop_id"]'
+        value: "499"
+      - id: 填写真实Cookie
+        as: shop
+        type: fill
+        selector: '#editdlg input[name="xk_cookie"]'
+        value: ${var:XK_COOKIE}
+      - id: 保存凭证
+        as: shop
+        type: click
+        selector: '#editdlg button.btn'
+      - id: flash提示已保存
+        as: shop
+        type: dom_assert
+        selector: '.content .flash'
+        contains: 已保存
+  - id: 导入10家筛选用真实酒店
+    type: flow
+    expect: 批量导入 10 家真实酒店（resolve_rows 只匹配本店 hotel_config——店里有货才筛得动）
+    steps:
+      - id: 打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击批量操作
+        as: shop
+        type: click
+        selector: '#btn-import'
+        waitFor: '#batchdlg[open]'
+      - id: 上传10家酒店Excel
+        as: shop
+        type: upload
+        selector: '#batchform input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/filter-hotels-10.xlsx
+        expect: 选择 10 家真实酒店 Excel（瑞麟湾=能筛出底价，其余 9 家=无底价对照；与场景04名单同源，upsert 幂等）
+      - id: 提交导入
+        as: shop
+        type: click
+        selector: '#batchform button[type="submit"]'
+      - id: flash提示任务已创建
+        as: shop
+        type: js_assert
+        script: '(document.querySelector(".content .flash") || { textContent: "" }).textContent'
+        contains: 共 10 行
+        expect: 导入任务已创建（共 10 行）
+      - id: KPI在营10家
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 600000
+        script: '(() => { const card = Array.from(document.querySelectorAll(".kpi")).find((k) => k.textContent.includes("在营酒店")); return card !== undefined && card.textContent.includes("10"); })()'
+        truthy: true
+        expect: 在营酒店 KPI 为 10（reload 轮询等信科逐行取数完成，约 1-2 分钟）
+      - id: 列表恰10行
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 120000
+        script: 'document.querySelectorAll(".tbl tbody tr").length === 10'
+        truthy: true
+        expect: 酒店列表恰 10 行（含供应商酒店ID，筛选按它优先匹配）
+  - id: 筛选页发起筛选任务
+    type: flow
+    expect: ①筛选执行页发起任务弹窗上传范围 Excel（10 行全匹配），flash 任务已创建且无未匹配
+    steps:
+      - id: 打开筛选执行页
+        as: shop
+        type: navigate
+        url: /maintain/filter
+      - id: 等任务表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击发起任务
+        as: shop
+        type: click
+        selector: '#btn-launch'
+        waitFor: '#launchdlg[open]'
+        expect: 打开发起任务弹窗（必含酒店名称列提示）
+      - id: 上传范围Excel
+        as: shop
+        type: upload
+        selector: '#launchdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/filter-scope.xlsx
+        expect: 选择范围 Excel（10 行=导入同源名单，全匹配）
+      - id: 提交发起
+        as: shop
+        type: click
+        selector: '#launchdlg button[type="submit"]'
+      - id: flash任务已创建共10行
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("任务已创建") && t.includes("共 10 行") && !t.includes("未匹配"); })()'
+        truthy: true
+        expect: flash 任务已创建（共 10 行）且无「未匹配」后缀——名单与导入同源，全部命中本店配置
+  - id: 任务进度留痕
+    type: flow
+    expect: /tasks 首行（=本次筛选任务，表按创建时间倒序）翻转为已完成 成功 1 / 失败 9——瑞麟湾筛出底价计成功，其余 9 家（无有效底价）计失败
+    steps:
+      - id: 打开任务进度页
+        as: shop
+        type: navigate
+        url: /tasks
+      - id: 等任务表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 筛选任务已完成成功1失败9
+        as: shop
+        type: js_assert
+        timeoutMs: 600000
+        reload: true
+        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("筛选") && tr.textContent.includes("已完成") && tr.textContent.includes("成功 1 / 失败 9"); })()'
+        truthy: true
+        expect: 首行「① 筛选（信科底价）」已完成，计数成功 1 / 失败 9（严格口径：瑞麟湾直签+供应商开票筛出底价；其余 9 家解析后无有效底价——正确业务结果）
+      - id: 下载筛选明细CSV
+        as: shop
+        type: download
+        click: '.tbl tbody tr:first-child a.chip[href*="/download"]'
+        namePrefix: task_
+        nameSuffix: .csv
+        headerContains: 行号
+        expect: 本次任务明细 CSV 落盘，表头为「行号,酒店名称,匹配,最低价,房型数,置信度,失败原因」——成功行有最低价与房型数，失败行失败原因列为「解析后无有效底价」
+  - id: 筛选页留痕
+    type: flow
+    expect: 回①筛选执行页，本工序最近任务表首行（=本次任务）已完成 1/10——工序页面的执行留痕证据
+    steps:
+      - id: 回筛选执行页
+        as: shop
+        type: navigate
+        url: /maintain/filter
+      - id: 等任务表渲染2
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 首行任务已完成
+        as: shop
+        type: js_assert
+        timeoutMs: 60000
+        reload: true
+        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("已完成") && tr.textContent.includes("1/10"); })()'
+        truthy: true
+        expect: 本工序任务表首行已完成、进度 1/10（每 tab 只看自己的运行结果）；该环节总结截图即筛选留痕
+teardown:
+  - id: 收尾删除10家筛选酒店
+    type: flow
+    expect: 行内删除按钮逐行清空 10 家酒店，跑完店铺酒店列表为空（不残留数据）
+    steps:
+      - id: 收尾打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 收尾等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第01家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第02家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第03家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第04家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第05家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第06家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第07家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第08家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第09家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾删除第10家
+        as: shop
+        type: click
+        selector: '.tbl tbody tr .btn-del'
+        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
+        waitFor: '.content .flash'
+        onFail: warn
+      - id: 收尾等表格重渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾列表清空
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 15000
+        script: 'document.querySelectorAll(".tbl tbody tr .btn-del").length === 0 && !Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.querySelector("td b"))'
+        truthy: true
+        expect: 收尾后无可删除酒店（空列表有占位行，按无 b 名称行断言）

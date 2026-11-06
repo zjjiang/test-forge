@@ -62,4 +62,6 @@ export interface RunResult {
   steps: StepResult[];
   warnings: WarningRecord[];
   dir: string;
+  /** 产物文件名（downloads/ 目录，如 task_52_result.csv），报告页可下载 */
+  downloads: string[];
 }

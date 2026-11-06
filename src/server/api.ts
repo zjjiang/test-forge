@@ -11,7 +11,13 @@ import {
   updateProject,
   ProjectInputError,
 } from "../store/projects.js";
-import { deleteVar, listVars, setVar, varSnapshot, VarInputError } from "../store/vars.js";
+import {
+  deleteVar,
+  listVars,
+  setVar,
+  varSnapshot,
+  VarInputError,
+} from "../store/vars.js";
 import {
   aiSettingsEnv,
   aiSettingsView,
@@ -25,7 +31,10 @@ import { parseScenario } from "../scenario/schema.js";
 import { parse as parseYaml } from "yaml";
 import { writeFile, readFile } from "node:fs/promises";
 import { aiConfigFrom, resolveAiEnv } from "../ai/glm.js";
-import { generateScenarioYaml, optimizeScenarioDescription } from "../ai/scenario-gen.js";
+import {
+  generateScenarioYaml,
+  optimizeScenarioDescription,
+} from "../ai/scenario-gen.js";
 import { runScenario, type SkipInfo } from "../runner/runner.js";
 import type { RunResult } from "../runner/types.js";
 
@@ -184,6 +193,7 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
         items.push({
           file: f,
           name: s.name,
+          module: s.module ?? null,
           actors: Object.keys(s.actors),
           steps: s.steps.length,
           requires: s.requires?.env ?? [],
@@ -213,7 +223,8 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
 
   app.get("/api/projects/:id/scenarios/:file/source", async (req, rep) => {
     const { id, file } = req.params as { id: string; file: string };
-    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+    if (!scenarioFileGuard(file))
+      return rep.code(400).send(fail("file must be a bare .yaml name", 400));
     const filePath = path.join(scenariosDir, id, file);
     let yaml = "";
     try {
@@ -232,86 +243,125 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
 
   app.put("/api/projects/:id/scenarios/:file/yaml", async (req, rep) => {
     const { id, file } = req.params as { id: string; file: string };
-    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+    if (!scenarioFileGuard(file))
+      return rep.code(400).send(fail("file must be a bare .yaml name", 400));
     const b = req.body as { content?: string };
     const content = b.content ?? "";
     let doc: unknown;
     try {
       doc = parseYaml(content);
     } catch (e) {
-      return rep.code(400).send(fail(`YAML 解析失败: ${e instanceof Error ? e.message : String(e)}`, 400));
+      return rep
+        .code(400)
+        .send(
+          fail(
+            `YAML 解析失败: ${e instanceof Error ? e.message : String(e)}`,
+            400,
+          ),
+        );
     }
     const parsed = parseScenario(doc);
-    if (!parsed.ok) return rep.code(400).send(fail(parsed.issues.join("\n"), 400));
+    if (!parsed.ok)
+      return rep.code(400).send(fail(parsed.issues.join("\n"), 400));
     await writeFile(path.join(scenariosDir, id, file), content, "utf8");
     return ok({ saved: true });
   });
 
   app.put("/api/projects/:id/scenarios/:file/description", async (req, rep) => {
     const { id, file } = req.params as { id: string; file: string };
-    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+    if (!scenarioFileGuard(file))
+      return rep.code(400).send(fail("file must be a bare .yaml name", 400));
     const b = req.body as { content?: string };
-    await writeFile(path.join(scenariosDir, id, file.replace(/\.ya?ml$/, ".md")), b.content ?? "", "utf8");
+    await writeFile(
+      path.join(scenariosDir, id, file.replace(/\.ya?ml$/, ".md")),
+      b.content ?? "",
+      "utf8",
+    );
     return ok({ saved: true });
   });
 
   app.post("/api/projects/:id/scenarios", async (req, rep) => {
     const id = (req.params as { id: string }).id;
-    if (getProject(store, id) === null) return rep.code(404).send(fail("project not found", 404));
+    if (getProject(store, id) === null)
+      return rep.code(404).send(fail("project not found", 404));
     const b = req.body as { name?: string; file?: string };
     const name = (b.name ?? "").trim();
     const file = (b.file ?? "").trim();
     if (name === "") return rep.code(400).send(fail("缺少场景名", 400));
-    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file 必须是不带路径的 .yaml 文件名", 400));
+    if (!scenarioFileGuard(file))
+      return rep
+        .code(400)
+        .send(fail("file 必须是不带路径的 .yaml 文件名", 400));
     const filePath = path.join(scenariosDir, id, file);
-    if (fs.existsSync(filePath)) return rep.code(400).send(fail("同名场景文件已存在", 400));
+    if (fs.existsSync(filePath))
+      return rep.code(400).send(fail("同名场景文件已存在", 400));
     const skeleton = `# ${name}（新场景骨架：在描述里写清环节后用 AI 生成，或直接编辑）\nname: ${name}\ndescription: 待补充\nversion: 1\nactors:\n  user:\n    description: 默认角色\nsteps:\n  - id: 占位环节\n    type: flow\n    expect: 请通过 AI 生成或直接编辑本场景\n    steps:\n      - id: 打开首页\n        as: user\n        type: navigate\n        url: /\n`;
     const parsed = parseScenario(parseYaml(skeleton));
-    if (!parsed.ok) return rep.code(500).send(fail("骨架校验失败: " + parsed.issues.join("; "), 500));
+    if (!parsed.ok)
+      return rep
+        .code(500)
+        .send(fail("骨架校验失败: " + parsed.issues.join("; "), 500));
     await writeFile(filePath, skeleton, "utf8");
     return rep.code(201).send(ok({ file, created: true }));
   });
 
-  app.post("/api/projects/:id/scenarios/:file/optimize-description", async (req, rep) => {
-    const { id, file } = req.params as { id: string; file: string };
-    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
-    const b = req.body as { description?: string } | null;
-    const description = (b?.description ?? "").trim();
-    if (description === "") return rep.code(400).send(fail("描述为空，先写点业务内容再优化", 400));
-    if (getProject(store, id) === null) return rep.code(404).send(fail("project not found", 404));
-    const aiEnv = resolveAiEnv(store, varSnapshot(store, id).values);
-    const r = await optimizeScenarioDescription(aiConfigFrom(aiEnv), description);
-    if (!r.ok) return rep.code(502).send(fail(r.error, 502));
-    return ok({ description: r.description, ms: r.ms });
-  });
+  app.post(
+    "/api/projects/:id/scenarios/:file/optimize-description",
+    async (req, rep) => {
+      const { id, file } = req.params as { id: string; file: string };
+      if (!scenarioFileGuard(file))
+        return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+      const b = req.body as { description?: string } | null;
+      const description = (b?.description ?? "").trim();
+      if (description === "")
+        return rep.code(400).send(fail("描述为空，先写点业务内容再优化", 400));
+      if (getProject(store, id) === null)
+        return rep.code(404).send(fail("project not found", 404));
+      const aiEnv = resolveAiEnv(store, varSnapshot(store, id).values);
+      const r = await optimizeScenarioDescription(
+        aiConfigFrom(aiEnv),
+        description,
+      );
+      if (!r.ok) return rep.code(502).send(fail(r.error, 502));
+      return ok({ description: r.description, ms: r.ms });
+    },
+  );
 
-  app.post("/api/projects/:id/scenarios/:file/ai-generate", async (req, rep) => {
-    const { id, file } = req.params as { id: string; file: string };
-    if (!scenarioFileGuard(file)) return rep.code(400).send(fail("file must be a bare .yaml name", 400));
-    const b = req.body as { description?: string } | null;
-    const filePath = path.join(scenariosDir, id, file);
-    let currentYaml = "";
-    try {
-      currentYaml = await readFile(filePath, "utf8");
-    } catch {
-      /* 新场景可以从零生成 */
-    }
-    let description = b?.description ?? "";
-    if (description.trim() === "") {
+  app.post(
+    "/api/projects/:id/scenarios/:file/ai-generate",
+    async (req, rep) => {
+      const { id, file } = req.params as { id: string; file: string };
+      if (!scenarioFileGuard(file))
+        return rep.code(400).send(fail("file must be a bare .yaml name", 400));
+      const b = req.body as { description?: string } | null;
+      const filePath = path.join(scenariosDir, id, file);
+      let currentYaml = "";
       try {
-        description = await readFile(filePath.replace(/\.ya?ml$/, ".md"), "utf8");
+        currentYaml = await readFile(filePath, "utf8");
       } catch {
-        /* 描述可为空 */
+        /* 新场景可以从零生成 */
       }
-    }
-    const project = getProject(store, id);
-    if (project === null) return rep.code(404).send(fail("project not found", 404));
-    const aiEnv = resolveAiEnv(store, varSnapshot(store, id).values);
-    const cfg = aiConfigFrom(aiEnv);
-    const r = await generateScenarioYaml(cfg, description, currentYaml);
-    if (!r.ok) return rep.code(502).send(fail(r.error, 502));
-    return ok({ yaml: r.yaml, ms: r.ms });
-  });
+      let description = b?.description ?? "";
+      if (description.trim() === "") {
+        try {
+          description = await readFile(
+            filePath.replace(/\.ya?ml$/, ".md"),
+            "utf8",
+          );
+        } catch {
+          /* 描述可为空 */
+        }
+      }
+      const project = getProject(store, id);
+      if (project === null)
+        return rep.code(404).send(fail("project not found", 404));
+      const aiEnv = resolveAiEnv(store, varSnapshot(store, id).values);
+      const cfg = aiConfigFrom(aiEnv);
+      const r = await generateScenarioYaml(cfg, description, currentYaml);
+      if (!r.ok) return rep.code(502).send(fail(r.error, 502));
+      return ok({ yaml: r.yaml, ms: r.ms });
+    },
+  );
 
   // ---- global AI (Midscene/GLM) settings ----
   app.get("/api/ai", async () => ok(aiSettingsView(store)));
@@ -424,7 +474,17 @@ export function buildApp(opts: ApiOptions = {}): FastifyInstance {
     } catch {
       summary = null;
     }
-    return ok({ run, summary });
+    /** 产物文件清单（download 步骤落盘），报告页下载链接用 */
+    let downloads: string[] = [];
+    try {
+      downloads = fs
+        .readdirSync(path.join(runDir, "downloads"))
+        .filter((f) => fs.statSync(path.join(runDir, "downloads", f)).isFile())
+        .sort();
+    } catch {
+      /* 无 download 步骤时目录不存在 */
+    }
+    return ok({ run, summary, downloads });
   });
 
   // evidence files (screenshots / trace / report.html) with traversal guard

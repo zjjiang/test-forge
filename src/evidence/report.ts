@@ -73,6 +73,15 @@ export function renderReport(
   const warnHtml = warnings.length
     ? `<div class="warnbox">${warnings.map((w) => `<div>⚠ ${esc(w)}</div>`).join("")}</div>`
     : "";
+  /** 产物下载：download 步骤落盘的文件，相对链接（run 目录整体拷走仍可用） */
+  const downloadsHtml = (r.downloads ?? []).length
+    ? `<div class="stats"><span>产物下载 ${r.downloads
+        .map(
+          (f) =>
+            `<a href="downloads/${esc(f)}" download style="margin-left:8px"><b>${esc(f)}</b></a>`,
+        )
+        .join("")}</span></div>`
+    : "";
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -118,6 +127,7 @@ th{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em
 <span>警告 <b>${r.warnings.length + warnings.length}</b></span>
 </div>
 ${warnHtml}
+${downloadsHtml}
 ${r.steps.map(stepRow).join("")}
 <p class="meta">TestForge · trace-*.zip 与 summary.json 在同目录</p>
 </div></body></html>`;

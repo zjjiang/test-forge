@@ -7,14 +7,13 @@ const slugKey = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[a-z][a-z0-9_-]*$/, "只允许小写字母开头，小写字母/数字/下划线/短横线");
+  .regex(
+    /^[a-z][a-z0-9_-]*$/,
+    "只允许小写字母开头，小写字母/数字/下划线/短横线",
+  );
 
 /** 步骤 id 允许中文等任意非空白字符（展示与截图文件名用），actor 名/变量名仍用 slugKey */
-const stepIdKey = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^\S+$/, "不能包含空格");
+const stepIdKey = z.string().min(1).max(64).regex(/^\S+$/, "不能包含空格");
 
 const httpMethod = z.enum([
   "GET",
@@ -223,7 +222,8 @@ const atomicSteps = z.discriminatedUnion("type", [
 ]);
 
 const stepSchema = z.discriminatedUnion("type", [
-  ...atomicSteps.options,  z.object({
+  ...atomicSteps.options,
+  z.object({
     ...stepCommon,
     type: z.literal("flow"),
     /** 环节内原子子步骤（不能再嵌 flow），跑完拍一张环节截图 */
@@ -249,6 +249,8 @@ export type ActorConfig = z.infer<typeof actorSchema>;
 export const scenarioSchema = z
   .object({
     name: z.string().min(1).max(100),
+    /** 所属业务模块（如 店铺管理 / 酒店管理），场景列表分组展示用 */
+    module: z.string().min(1).max(40).optional(),
     description: z.string().max(500).optional(),
     version: z.number().int().min(1).default(1),
     /** 缺省时用项目配置的 baseUrl；场景里写baseUrl 可覆盖 */
@@ -283,7 +285,13 @@ export const scenarioSchema = z
     const expand = (steps: StepLike[], where: string): [StepLike, string][] =>
       steps.flatMap((st, i) =>
         st.type === "flow"
-          ? [[st, `${where}.${i}`] as [StepLike, string], ...st.steps.map((sub, j) => [sub, `${where}.${i}.steps.${j}`] as [StepLike, string])]
+          ? [
+              [st, `${where}.${i}`] as [StepLike, string],
+              ...st.steps.map(
+                (sub, j) =>
+                  [sub, `${where}.${i}.steps.${j}`] as [StepLike, string],
+              ),
+            ]
           : [[st, `${where}.${i}`] as [StepLike, string]],
       );
     const allSteps: [StepLike, string][] = [
@@ -291,7 +299,9 @@ export const scenarioSchema = z
       ...expand(s.teardown ?? [], "teardown"),
     ];
     for (const [st, where] of allSteps) {
-      const seg = where.split(".").map((x) => (/^\d+$/.test(x) ? Number(x) : x));
+      const seg = where
+        .split(".")
+        .map((x) => (/^\d+$/.test(x) ? Number(x) : x));
       if (st.as !== undefined && !actorKeys.has(st.as)) {
         ctx.addIssue({
           code: "custom",
@@ -299,18 +309,34 @@ export const scenarioSchema = z
           message: `未定义的 actor「${st.as}」`,
         });
       }
-      if (st.type === "wait" && st.ms === undefined && st.selector === undefined) {
+      if (
+        st.type === "wait" &&
+        st.ms === undefined &&
+        st.selector === undefined
+      ) {
         ctx.addIssue({
           code: "custom",
           path: seg,
           message: "wait 需要 ms 或 selector 之一",
         });
       }
-      if (st.type === "select" && st.value === undefined && st.label === undefined) {
-        ctx.addIssue({ code: "custom", path: seg, message: "select 需要 value 或 label 之一" });
+      if (
+        st.type === "select" &&
+        st.value === undefined &&
+        st.label === undefined
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: seg,
+          message: "select 需要 value 或 label 之一",
+        });
       }
       if (st.type === "extract" && st.into === undefined) {
-        ctx.addIssue({ code: "custom", path: seg, message: "extract 需要 into（写入的变量名）" });
+        ctx.addIssue({
+          code: "custom",
+          path: seg,
+          message: "extract 需要 into（写入的变量名）",
+        });
       }
       if (
         st.type === "js_assert" &&
@@ -318,7 +344,11 @@ export const scenarioSchema = z
         st.contains === undefined &&
         st.truthy === undefined
       ) {
-        ctx.addIssue({ code: "custom", path: seg, message: "js_assert 需要 equals / contains / truthy 之一" });
+        ctx.addIssue({
+          code: "custom",
+          path: seg,
+          message: "js_assert 需要 equals / contains / truthy 之一",
+        });
       }
     }
   });

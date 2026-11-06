@@ -1,5 +1,6 @@
 # 场景一：信科Cookie有效性闭环（建店 → 店侧登录 → 无效告警 → 换有效Cookie → 告警解除）
 # 硬规则：写操作只落 E2E- 前缀店铺；依赖环境变量 XK_COOKIE（真实有效信科Cookie，secret）
+module: 店铺管理
 name: 信科Cookie闭环
 description: 建店→店侧登录→无效凭证告警→换环境变量Cookie→验证生效，对应 Cookie 有效性闭环
 version: 2

@@ -1,4 +1,4 @@
-import { cpSync } from "node:fs";
+import { cpSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
 import type { Store } from "../store/db.js";
@@ -87,6 +87,7 @@ export async function runScenario(
       steps: [],
       warnings: [{ where: "baseUrl", message: reason }],
       dir: evidence.dir,
+      downloads: [],
     };
   }
   if (missing.length > 0) {
@@ -328,6 +329,13 @@ export async function runScenario(
     }
   }
   const finishedAt = new Date().toISOString();
+  /** 产物清单（download 步骤落盘的 downloads/ 文件），报告页提供下载链接 */
+  let downloads: string[] = [];
+  try {
+    downloads = readdirSync(path.join(evidence.dir, "downloads")).sort();
+  } catch {
+    /* 无 download 步骤时目录不存在 */
+  }
   const result: RunResult = {
     runId: run.id,
     projectId: opts.projectId,
@@ -339,6 +347,7 @@ export async function runScenario(
     steps: stepResults,
     warnings,
     dir: evidence.dir,
+    downloads,
   };
   evidence.writeSummary(result);
   evidence.writeText(

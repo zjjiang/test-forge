@@ -79,6 +79,7 @@ table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
 th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);font-weight:500;background:var(--th)}
 tr.click{cursor:pointer}tr.click:hover td{background:var(--pri-soft)}
+.modbadge{display:inline-block;background:var(--pri-soft);color:var(--pri);font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;margin-left:8px;white-space:nowrap}
 input,select{font:inherit;color:var(--fg);background:var(--card);padding:5px 8px;border:1px solid var(--line);border-radius:4px;width:100%}
 button{font:inherit;color:var(--fg);padding:6px 12px;border-radius:4px;border:1px solid var(--line);background:var(--card);cursor:pointer}
 button.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
@@ -362,15 +363,16 @@ async function viewProject() {
 async function tabScenarios(p, counts) {
   if (S.scn !== null) return tabWorkbench(p);
   var items = CACHE.scenarios[S.p];
-  var h = '<div class="card"><div class="row"><b>场景</b><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引。</span><span style="margin-left:auto"></span><button onclick="openNewScnModal()">＋ 新建场景</button></div><table><tr><th>场景</th><th>角色</th><th>步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
-  if (!items.length) h += '<tr><td colspan="6" class="empty">还没有场景。在 scenarios/' + esc(p.id) + '/ 下放 YAML，或让 Claude Code 按需求生成。</td></tr>';
+  var h = '<div class="card"><div class="row"><b>场景</b><span class="mut">场景文件放在仓库 <code>scenarios/' + esc(p.id) + '/</code> 目录，平台自动索引。</span><span style="margin-left:auto"></span><button onclick="openNewScnModal()">＋ 新建场景</button></div><table><tr><th style="width:90px">模块</th><th>场景</th><th>角色</th><th style="width:52px">步骤</th><th>依赖 env</th><th>最近结果</th><th></th></tr>';
+  if (!items.length) h += '<tr><td colspan="7" class="empty">还没有场景。在 scenarios/' + esc(p.id) + '/ 下放 YAML，或让 Claude Code 按需求生成。</td></tr>';
   items.forEach(function (s) {
+    var modCell = '<td>' + (s.module ? '<span class="modbadge" style="margin-left:0">' + esc(s.module) + '</span>' : '<span class="mut">—</span>') + '</td>';
     if (!s.valid) {
-      h += '<tr><td><b>' + esc(s.file) + '</b></td><td colspan="5" class="err">' + s.issues.map(esc).join('<br>') + '</td></tr>';
+      h += '<tr>' + modCell + '<td><b>' + esc(s.file) + '</b></td><td colspan="4" class="err">' + s.issues.map(esc).join('<br>') + '</td><td></td></tr>';
       return;
     }
     var last = s.lastRun;
-    h += '<tr><td><a title="打开场景工作台：' + esc(s.file) + '" onclick="openScn(\'' + esc(s.file) + '\')"><b>' + esc(s.name) + '</b></a></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
+    h += '<tr>' + modCell + '<td><a title="打开场景工作台：' + esc(s.file) + '" onclick="openScn(\'' + esc(s.file) + '\')"><b>' + esc(s.name) + '</b></a></td><td class="mut">' + s.actors.join(' → ') + '</td><td>' + s.steps + '</td>'
       + '<td class="mut">' + (s.requires.length ? s.requires.join(', ') : '—') + '</td><td>' + (last ? badge(last.status) : '—') + '</td>'
       + '<td><button title="打开场景工作台：描述 + YAML + AI 优化" onclick="openScn(\'' + esc(s.file) + '\')">配置</button> '
       + '<button onclick="triggerRun(\'' + esc(p.id) + '\',\'' + esc(s.file) + '\',this)">运行</button> '
@@ -400,9 +402,11 @@ async function tabWorkbench(p) {
   }
   var nm = /^name:\s*(.+)$/m.exec(src.yaml);
   curName = nm ? nm[1].trim() : '';  // 供改名弹窗取当前名
+  var md = /^module:\s*(.+)$/m.exec(src.yaml);  // 模块徽标
   setTimeout(function () { initScnEditor(src.description); }, 0);
   var h = '<div class="card">';
   h += '<div class="row"><button onclick="backScn()">← 返回列表</button><b style="margin-left:8px">' + esc(S.scn) + '</b>'
+    + (md ? '<span class="modbadge">' + esc(md[1].trim()) + '</span>' : '');
     + '<span style="margin-left:auto"></span>'
     + '<button class="pri" onclick="runScn(this)">▶ 运行本场景</button></div>';
   var onDesc = S.scnTab !== 'yaml';
@@ -666,6 +670,13 @@ async function viewRun() {
   h += '<h2>' + esc(run.scenarioName) + ' ' + badge(run.status) + '</h2>';
   h += '<div class="mut" style="margin-bottom:10px">run <code>' + esc(run.id) + '</code> · 耗时 ' + fmtMs(run.durationMs) + ' · 断言（确定性/AI）' + det + ' / ' + ai + ' · 触发 ' + esc(run.triggeredBy || '—') + ' · ' + esc(fmtTime(run.startedAt)) + '</div>';
   h += '<div class="row" style="justify-content:flex-start;margin-bottom:14px"><a href="' + base + 'report.html" target="_blank"><button>完整报告</button></a><span class="mut">细节： <a href="' + base + 'summary.json" target="_blank">summary.json</a> · <a href="' + base + 'scenario.yaml" target="_blank">scenario.yaml</a> · <a href="' + base + 'trace-' + esc(steps.length && steps[0].actor ? steps[0].actor : 'user') + '.zip">trace.zip</a></span></div>';
+  var dls = data.downloads || [];
+  if (dls.length) {
+    h += '<div class="card" style="padding:10px 16px"><b>产物下载</b> <span class="mut">download 步骤落盘的文件（如任务明细 CSV，Excel/WPS 可直接打开）：</span>'
+      + dls.map(function (f) {
+        return '<a href="' + base + 'downloads/' + encodeURIComponent(f) + '" download><button style="margin-left:8px">' + esc(f) + '</button></a>';
+      }).join('') + '</div>';
+  }
   var bad = steps.filter(function (st) { return st.status === 'failed' || st.status === 'warned'; });
   if (bad.length) {
     h += '<div class="warn" style="margin-bottom:14px"><b>' + bad.length + ' 步未通过：</b>'
