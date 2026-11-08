@@ -221,13 +221,18 @@ steps:
         type: js_assert
         timeoutMs: 300000
         reload: true
-        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const jobOf = (r) => { const a = r.querySelector("a[href*=\"job_id\"]"); if (!a) return null; const m = a.textContent.trim().match(/^#(\\d+)-/); return m ? m[1] : null; }; const first = jobOf(rows[0] || {}); if (!first) return false; const mine = rows.filter((r) => jobOf(r) === first); return mine.length === 3; })()'
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const jobOf = (r) => { const a = r.querySelector("a[href*=\"job_id\"]"); if (!a) return null; const m = a.textContent.trim().match(/^#(\d+)-/); return m ? m[1] : null; }; const first = jobOf(rows[0] || {}); if (!first) return false; const mine = rows.filter((r) => jobOf(r) === first); return mine.length === 3; })()'
         truthy: true
         expect: 当日结果表按本次任务号圈定恰 3 行（reload 轮询等后台串跑完成）
   - id: 数据库验证抓取结果
     type: flow
-    expect: TestForge db 步骤直查 htinns 库：link_event 6 条且来源各 3、task_progress 最新一条 done、wf_step_log 6 条、至少一家抓到对标价（warn）
+    expect: TestForge db 步骤直查 htinns 库：link_event 来源不变式、携程艺龙 ≥6 条带价、workflow_job steps_done 且子任务无未匹配、wf_step_log 对齐
     steps:
+      - id: 等待任务闭环
+        as: shop
+        type: wait
+        ms: 2000
+        expect: 等后台 spawn_single 把 workflow_job 落到 steps_done（页面行出现≠任务收尾完成，快跑时存在竞态——run 20261108-231717 实证）
       - id: DB_link_event汇总
         as: shop
         type: db
