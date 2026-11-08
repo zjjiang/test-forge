@@ -231,9 +231,9 @@ steps:
         type: js_assert
         timeoutMs: 60000
         reload: true
-        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const pill = (r) => Array.from(r.querySelectorAll(".pill")).map((p) => p.textContent.trim()); const rlw = rows.find((r) => r.textContent.includes("瑞麟湾")); if (rlw === undefined) return false; const link = rlw.querySelector("a[href*=\"job_id\"]"); if (!link) return false; const job = link.textContent.trim(); const mine = rows.filter((r) => Array.from(r.querySelectorAll("a")).some((a) => a.textContent.trim() === job)); const ok = mine.filter((r) => pill(r).includes("成功")); const bad = mine.filter((r) => pill(r).includes("失败")); return mine.length === 10 && ok.length === 1 && bad.length === 9 && ok.includes(rlw); })()'
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const pill = (r) => Array.from(r.querySelectorAll(".pill")).map((p) => p.textContent.trim()); const jobOf = (r) => { const a = r.querySelector("a[href*=\"job_id\"]"); if (!a) return null; const m = a.textContent.trim().match(/^#(\d+)-/); return m ? m[1] : null; }; const rlw = rows.find((r) => r.textContent.includes("瑞麟湾")); if (rlw === undefined) return false; const job = jobOf(rlw); if (!job) return false; const mine = rows.filter((r) => jobOf(r) === job); const ok = mine.filter((r) => pill(r).includes("成功")); const bad = mine.filter((r) => pill(r).includes("失败")); return mine.length === 10 && ok.length === 1 && bad.length === 9 && ok.includes(rlw); })()'
         truthy: true
-        expect: 以瑞麟湾行「所属工作流」链接（本次任务 #N）圈定本次 10 行——恰 1 行成功且是瑞麟湾、9 行失败；同日重跑会累积历史任务的行（旧任务酒店已删则名字回退显示 #SHID），断言按任务号圈定不受影响；该环节总结截图即筛选留痕
+        expect: 以瑞麟湾行「子任务」链接 #N-行号 的任务号圈定本次 10 行——恰 1 行成功且是瑞麟湾、9 行失败；同日重跑会累积历史任务的行（旧任务酒店已删则名字回退显示 #SHID），断言按任务号圈定不受影响；该环节总结截图即筛选留痕
 teardown:
   - id: 收尾删除10家筛选酒店
     type: flow
