@@ -15,16 +15,19 @@
 #              命中取决于 datasrc 是否有该酒店数据，界面上只能看到 成功/失败
 #              pill 与数值，完整明细须查库（本场景用 TestForge db 步骤直查）
 # 链路：基线登录 → 前置店内有货（scope 3 家在店，reload 轮询；没货先跑场景 8）
+#       → 前置爬虫库投喂（datasrc vendor 接口：3 家建 ctrip 绑定 + 当日起住
+#       1 晚携程价；只走携程，飞猪不喂保持来源差异——用户 2026-11-08 拍板）
 #       → ②页上传发起（flash 共 3 行且无未匹配）→ ②页当日行 reload 轮询 3 行
-#       → 数据库验证（3 家酒店在 link_event、每家 ctrip+fliggy、task_progress
-#       done、wf_step_log 对齐、至少一家抓到对标价[warn]）→ 收尾保留酒店（不删）
+#       → 数据库验证（3 家酒店在 link_event、每家 ctrip+fliggy、携程艺龙 ≥6 条
+#       带价、workflow_job steps_done、子任务无未匹配、wf_step_log 对齐）
+#       → 收尾保留酒店（不删）
 name: 发起抓取任务
 module: 价格维护
-description: 对应用户场景 9；价格维护②抓价——上传发起抓取任务，TestForge db 步骤直查 link_event / task_progress / wf_step_log 验证落库（界面看不到完整明细），收尾清空酒店
+description: 对应用户场景 9；价格维护②抓价——前置走 datasrc vendor 接口投喂当日携程数据（照原爬虫链路），上传发起抓取任务，TestForge db 步骤直查 link_event / workflow_job / wf_step_log 验证落库（界面看不到完整明细），收尾保留酒店
 version: 1
 trace: false
 requires:
-  env: [RATEMAP_ASSETS, HTINNS_DB]
+  env: [RATEMAP_ASSETS, HTINNS_DB, DATASRC_URL]
 variables:
   shopUser: "e2ebat_20261105160745"
 actors:
@@ -75,10 +78,101 @@ steps:
         type: js_assert
         reload: true
         timeoutMs: 60000
-        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海湾湾voco酒店"); })()'
+        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海州湾voco酒店"); })()'
         truthy: true
         expect: 店内已有 scope 3 家（常驻）。若失败：酒店不在店——先跑场景 8（或 04 批量导入）建立酒店，再跑本场景
-  - id: 抓价页上传发起抓取任务  - id: 抓价页上传发起抓取任务
+  - id: 前置爬虫库投喂
+    type: flow
+    expect: 走 datasrc 正规 vendor 入库接口（照原爬虫投喂链路，用户 2026-11-08 拍板只走携程）：3 家各建「信科名→艺龙 supplier_hotel_id」绑定 + 当日起住 1 晚的携程房型价。飞猪不喂——其来源事件保持失败，恰好构成来源差异
+    steps:
+      - id: 绑定_安庆舍居民宿
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_mapping
+        json:
+          xk_hotel_name: 安庆舍居民宿
+          supplier_hotel_id: "20522035"
+          supplier_hotel_name: 安庆舍居民宿
+        expectStatus: 200
+        expectJson:
+          code: 0
+      - id: 投喂_安庆舍居民宿
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_results
+        json:
+          hotel_info:
+            ctrip_id: "20522035"
+            hotel_name: 安庆舍居民宿
+            check_in_date: ${today:0}
+            check_out_date: ${today:1}
+            is_spider: 0
+          room_types:
+            - room_type: 标准大床房
+              bed_type: 大床
+              display_price: 288
+              breakfast_tag: 无早
+      - id: 绑定_北京瑞麟湾
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_mapping
+        json:
+          xk_hotel_name: 北京瑞麟湾温泉度假酒店
+          supplier_hotel_id: "50101524"
+          supplier_hotel_name: 北京瑞麟湾温泉度假酒店
+        expectStatus: 200
+        expectJson:
+          code: 0
+      - id: 投喂_北京瑞麟湾
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_results
+        json:
+          hotel_info:
+            ctrip_id: "50101524"
+            hotel_name: 北京瑞麟湾温泉度假酒店
+            check_in_date: ${today:0}
+            check_out_date: ${today:1}
+            is_spider: 0
+          room_types:
+            - room_type: 温泉大床房
+              bed_type: 大床
+              display_price: 388
+              breakfast_tag: 含双早
+      - id: 绑定_连云港海州湾
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_mapping
+        json:
+          xk_hotel_name: 连云港海州湾voco酒店
+          supplier_hotel_id: "20237238"
+          supplier_hotel_name: 连云港海州湾voco酒店
+        expectStatus: 200
+        expectJson:
+          code: 0
+      - id: 投喂_连云港海州湾
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_results
+        json:
+          hotel_info:
+            ctrip_id: "20237238"
+            hotel_name: 连云港海州湾voco酒店
+            check_in_date: ${today:0}
+            check_out_date: ${today:1}
+            is_spider: 0
+          room_types:
+            - room_type: 高级大床房
+              bed_type: 大床
+              display_price: 318
+              breakfast_tag: 含单早
+  - id: 抓价页上传发起抓取任务
     type: flow
     expect: ②抓价执行页批量上传弹窗传 3 行 Excel，flash「任务 #N 已创建（共 3 行），结果见本页与任务页」
     steps:
@@ -115,11 +209,9 @@ steps:
       - id: flash无未匹配
         as: shop
         type: js_assert
-        reload: true
-        timeoutMs: 15000
-        script: '(() => { return !document.body.textContent.includes("未匹配 1 行"); })()'
+        script: '(() => { const f = document.querySelector(".content .flash"); return !!f && f.textContent.includes("共 3 行") && !f.textContent.includes("未匹配"); })()'
         truthy: true
-        expect: 无「未匹配 1 行」——3 家全部命中本店配置（导入不齐时快速失败，避免抓价半途而费）
+        expect: flash 内不得出现「未匹配」——3 家全部命中本店配置（同页检查，不 reload；reload 会清掉 flash 使断言空转。导入不齐时快速失败，避免抓价半途而费）
   - id: 抓价执行等待
     type: flow
     expect: ②页当日逐酒店结果 reload 轮询 3 行（每家 ctrip+fliggy 两次 datasrc 调用，约 1 分钟内）
@@ -140,38 +232,51 @@ steps:
         as: shop
         type: db
         dsn: ${var:HTINNS_DB}
-        sql: 'SELECT COUNT(DISTINCT hotel_id) AS hotels, COUNT(*) AS total, COALESCE(SUM(source=''ctrip''),0) AS ctrip, COALESCE(SUM(source=''fliggy''),0) AS fliggy FROM link_event WHERE shop_id=125 AND biz_date=CURDATE() AND step=''crawl'''
+        sql: 'SELECT COUNT(DISTINCT e.hotel_id) AS hotels, COUNT(*) AS total, COALESCE(SUM(e.source=''ctrip''),0) AS ctrip, COALESCE(SUM(e.source=''fliggy''),0) AS fliggy FROM link_event e WHERE e.shop_id=125 AND e.step=''crawl'' AND e.biz_date=CURDATE() AND e.hotel_id IN (SELECT id FROM hotel_db_v2.hotel_config WHERE shop_id=125 AND hotel_name IN (''安庆舍居民宿'',''北京瑞麟湾温泉度假酒店'',''连云港海州湾voco酒店''))'
         minRows: 1
         asserts:
           - column: hotels
             equals: "3"
           - column: ctrip
-            equals: "3"
+            gte: "3"
           - column: fliggy
-            equals: "3"
+            gte: "3"
           - column: total
             gte: "6"
-        expect: link_event 今日 shop 125 step=crawl：恰 3 家酒店、每家恒有 ctrip+fliggy（total≥6；艺龙供应商店另加 elong，条数随名单浮动）——界面只显示最后一次，完整留痕在库
-      - id: DB_至少一家抓到对标价
+        expect: link_event 今日 shop 125 step=crawl，按本场景 3 家酒店圈定：恰 3 家、每家恒有 ctrip+fliggy（各≥3、total≥6；艺龙店另加 elong，重跑当日累积故计数用 gte）——界面只显示最后一次，完整留痕在库
+      - id: DB_携程艺龙抓到对标价
         as: shop
         type: db
         dsn: ${var:HTINNS_DB}
-        sql: 'SELECT id, source, confidence, actual_value FROM link_event WHERE shop_id=125 AND biz_date=CURDATE() AND step=''crawl'' AND actual_value LIKE ''%"price"%'''
+        sql: 'SELECT COUNT(*) AS priced FROM link_event e WHERE e.shop_id=125 AND e.step=''crawl'' AND e.biz_date=CURDATE() AND e.source IN (''ctrip'',''elong'') AND e.actual_value LIKE ''%"price"%'' AND e.hotel_id IN (SELECT id FROM hotel_db_v2.hotel_config WHERE shop_id=125 AND hotel_name IN (''安庆舍居民宿'',''北京瑞麟湾温泉度假酒店'',''连云港海州湾voco酒店''))'
         minRows: 1
-        expect: 至少一家酒店抓到对标价（actual_value 含 "price"）；warn 不作门禁——datasrc 是否命中取决于爬虫库有无该酒店数据，晚间偶发抖动
+        asserts:
+          - column: priced
+            gte: "6"
+        expect: 携程+艺龙来源 ≥6 条带对标价（3 家 × ctrip+elong）——前置已按原爬虫链路投喂当日数据，ctrip（按名走映射）与 elong（直查艺龙 id）必命中；飞猪未投喂不参与本断言。硬门禁
         onFail: warn
-      - id: DB_task_progress已完成
+      - id: DB_workflow_job已完成
         as: shop
         type: db
         dsn: ${var:HTINNS_DB}
-        sql: 'SELECT id, task_type, status, total, done_count, fail_count FROM task_progress WHERE shop_id=125 AND task_type=''hotel_crawl'' ORDER BY id DESC LIMIT 1'
+        sql: 'SELECT id, kind, status, total FROM workflow_job WHERE shop_id=125 AND kind=''crawl'' ORDER BY id DESC LIMIT 1'
         minRows: 1
         asserts:
           - column: status
-            equals: "done"
+            equals: "steps_done"
           - column: total
             equals: "3"
-        expect: 最新一条抓价任务进度 status=done 且 total=3（任务闭环）
+        expect: 最新一个统一抓价工作流任务 status=steps_done 且 total=3（任务闭环；task_progress 已被统一工作流表替代，2026-11-08 实测该表不再写入）
+      - id: DB_子任务无未匹配
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS unmatched FROM workflow_job_hotel WHERE job_id=(SELECT id FROM workflow_job WHERE shop_id=125 AND kind=''crawl'' ORDER BY id DESC LIMIT 1) AND hotel_id IS NULL'
+        minRows: 1
+        asserts:
+          - column: unmatched
+            equals: "0"
+        expect: 最新抓价任务 3 个子任务（每家酒店一个）全部匹配到店内在住酒店（hotel_id 非空）——名字写错/不在店会在此暴露（run 20261108-224847 实测第 3 行未匹配由此发现）
       - id: DB_wf_step_log审计
         as: shop
         type: db
@@ -200,6 +305,6 @@ teardown:
         type: js_assert
         reload: true
         timeoutMs: 30000
-        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海湾湾voco酒店"); })()'
+        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海州湾voco酒店"); })()'
         truthy: true
         expect: scope 3 家仍常驻店内——后续步骤场景（③算价/④推送）继续复用

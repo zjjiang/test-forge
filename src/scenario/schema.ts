@@ -180,9 +180,12 @@ const atomicSteps = z.discriminatedUnion("type", [
     ...stepCommon,
     type: z.literal("http"),
     method: httpMethod,
+    /** 路径相对项目 baseUrl；写绝对 URL（如 ${var:DATASRC_URL}/...）时以绝对 URL 为准 */
     path: z.string().min(1),
     /** 表单编码请求体（复用 actor 登录态 cookie） */
     form: z.record(z.string(), z.string()).optional(),
+    /** JSON 请求体（datasrc 投喂等只收 JSON 的接口）；与 form 二选一，同时给时 json 优先 */
+    json: z.record(z.string(), z.unknown()).optional(),
     /** 不跟随重定向（断言 302 时用） */
     maxRedirects: z.number().int().min(0).max(20).optional(),
     expectStatus: z.number().int().min(200).max(599).optional(),

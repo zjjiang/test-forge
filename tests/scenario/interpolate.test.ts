@@ -3,7 +3,7 @@ import { InterpolationError, interpolate, interpolateDeep } from '../../src/scen
 
 describe('interpolate', () => {
 	it('替换 ${var:NAME} 引用', () => {
-		expect(interpolate('${var:HOST}/login', { HOST: 'http://localhost:5005' })).toBe('http://localhost:5005/login');
+		expect(interpolate('${var:HOST}/login', { HOST: 'http://datasrc-url' })).toBe('http://datasrc-url/login');
 	});
 
 	it('值会被字符串化', () => {
@@ -28,7 +28,7 @@ describe('interpolate', () => {
 		}
 	});
 
-	it('null/undefined 值同样报错', () => {
+	it('null/undefined 导出同样报错', () => {
 		expect(() => interpolate('${var:N}', { N: null })).toThrow(InterpolationError);
 	});
 });
@@ -44,5 +44,33 @@ describe('interpolateDeep', () => {
 
 	it('非字符串值原样保留', () => {
 		expect(interpolateDeep({ n: 5, b: true, nil: null }, {})).toEqual({ n: 5, b: true, nil: null });
+	});
+});
+
+describe('interpolate ${today:N}', () => {
+	const expected = (offset: number): string => {
+		const d = new Date();
+		d.setDate(d.getDate() + offset);
+		const m = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${d.getFullYear()}-${m}-${day}`;
+	};
+
+	it('${today:0} 是今天', () => {
+		expect(interpolate('check_in=${today:0}', {})).toBe(`check_in=${expected(0)}`);
+	});
+
+	it('${today:1} 是明天', () => {
+		expect(interpolate('${today:1}', {})).toBe(expected(1));
+	});
+
+	it('负偏移 ${today:-1} 是昨天', () => {
+		expect(interpolate('${today:-1}', {})).toBe(expected(-1));
+	});
+
+	it('与 ${var:} 混用', () => {
+		expect(interpolate('${var:BASE}/api?d=${today:0}', { BASE: 'http://datasrc-api' })).toBe(
+			`http://datasrc-api/api?d=${expected(0)}`,
+		);
 	});
 });

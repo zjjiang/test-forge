@@ -460,9 +460,17 @@ export async function executeStep(
         }
         case "http": {
           const url = new URL(step.path, ctx.baseUrl).href;
+          const jsonBody =
+            step.json !== undefined
+              ? {
+                  data: JSON.stringify(step.json),
+                  headers: { "content-type": "application/json" },
+                }
+              : {};
           const res = await ctx.runtime.context.request.fetch(url, {
             method: step.method,
-            form: step.form,
+            form: step.json !== undefined ? undefined : step.form,
+            ...jsonBody,
             maxRedirects: step.maxRedirects,
             failOnStatusCode: false,
           });
