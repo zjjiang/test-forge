@@ -132,7 +132,11 @@ code{font-family:var(--f-mono);background:var(--code);padding:1px 5px;border-rad
 #lb{position:fixed;inset:0;background:rgba(10,14,22,.86);display:flex;align-items:center;justify-content:center;z-index:50}
 #lb[hidden]{display:none}
 #lb figure{margin:0;max-width:96vw;display:flex;flex-direction:row;gap:20px;align-items:center}
-#lb img{max-width:calc(96vw - 360px);max-height:86vh;object-fit:contain;border-radius:4px;background:#fff}
+#lb img{max-width:calc(96vw - 360px);max-height:86vh;object-fit:contain;border-radius:4px;background:#fff;cursor:zoom-in;will-change:transform}
+#lb img.zoomed{cursor:grab}
+#lb img.dragging{cursor:grabbing}
+.lb-zoom{font:12px var(--f-mono);color:#c3cad8;background:rgba(255,255,255,.1);padding:2px 8px;border-radius:10px}
+.lb-hint{font-size:13px !important;color:#8f98ab !important}
 #lb figcaption{color:#f2f5fb;font-size:16px;text-align:left;flex:0 0 380px;display:flex;flex-direction:column;gap:10px;max-height:86vh;overflow:auto}
 #lb figcaption b{font-size:20px}
 .lb-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -793,6 +797,61 @@ function lbGo(d) {
   if (next < 0 || next >= S.shots.length) return; // 到头就停，不循环
   S.lb = next; drawLb();
 }
+/* ---- lightbox 缩放：滚轮朝光标缩放、拖拽平移、双击复位 ---- */
+S.lbZoom = { k: 1, x: 0, y: 0 };
+function lbApplyZoom(img) {
+  img.style.transform = 'translate(' + S.lbZoom.x + 'px,' + S.lbZoom.y + 'px) scale(' + S.lbZoom.k + ')';
+  var z = document.querySelector('.lb-zoom');
+  if (z) z.textContent = Math.round(S.lbZoom.k * 100) + '%';
+  img.classList.toggle('zoomed', S.lbZoom.k > 1);
+}
+function lbResetZoom(img) {
+  S.lbZoom = { k: 1, x: 0, y: 0 };
+  img.classList.remove('dragging');
+  lbApplyZoom(img);
+}
+function lbZoomAt(img, cx, cy, factor) {
+  var k0 = S.lbZoom.k;
+  var k = Math.min(10, Math.max(1, k0 * factor));
+  if (k === k0) return;
+  var rc = img.getBoundingClientRect();
+  var ox = rc.left + rc.width / 2, oy = rc.top + rc.height / 2; // 变换原点=图片中心
+  var px = cx - ox - S.lbZoom.x, py = cy - oy - S.lbZoom.y;     // 光标相对图片坐标
+  var t = k / k0;
+  S.lbZoom.k = k;
+  S.lbZoom.x = cx - ox - px * t;
+  S.lbZoom.y = cy - oy - py * t;
+  if (k === 1) { S.lbZoom.x = 0; S.lbZoom.y = 0; }
+  lbApplyZoom(img);
+}
+function lbBindZoom(img) {
+  lbResetZoom(img);
+  img.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    lbZoomAt(img, e.clientX, e.clientY, e.deltaY < 0 ? 1.2 : 1 / 1.2);
+  }, { passive: false });
+  img.addEventListener('dblclick', function (e) {
+    if (S.lbZoom.k > 1) lbResetZoom(img);
+    else lbZoomAt(img, e.clientX, e.clientY, 2.5);
+  });
+  img.addEventListener('mousedown', function (e) {
+    if (S.lbZoom.k <= 1) return;
+    e.preventDefault();
+    var sx = e.clientX - S.lbZoom.x, sy = e.clientY - S.lbZoom.y;
+    img.classList.add('dragging');
+    function mv(ev) {
+      S.lbZoom.x = ev.clientX - sx; S.lbZoom.y = ev.clientY - sy;
+      lbApplyZoom(img);
+    }
+    function up() {
+      img.classList.remove('dragging');
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+    }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+}
 function drawLb() {
   var s = S.shots[S.lb];
   var ai = s.ai || [];
@@ -806,12 +865,15 @@ function drawLb() {
     + (S.shots.length > 1 ? '<button class="lb-nav lb-prev" title="上一张 (←)" onclick="lbGo(-1)"' + (S.lb === 0 ? ' disabled' : '') + '>‹</button><button class="lb-nav lb-next" title="下一张 (→)" onclick="lbGo(1)"' + (S.lb === S.shots.length - 1 ? ' disabled' : '') + '>›</button>' : '')
     + '<figure><img src="' + esc(s.src) + '" alt=""><figcaption>'
       + '<div class="lb-row"><b class="lb-count">' + (S.lb + 1) + ' / ' + S.shots.length + '</b><b class="lb-step">' + esc(s.stepId) + '</b>' + badge(s.status)
+      + '<span class="lb-zoom">100%</span>'
       + '<span class="lb-mut">步骤 ' + s.sn + ' · 角色 ' + esc(s.actor || '—') + '</span></div>'
+      + '<div class="lb-mut lb-hint">滚轮缩放 · 拖拽平移 · 双击复位（← → 切图）</div>'
       + (s.expect && s.expect !== s.stepId ? '<div class="lb-mut">验收点：' + esc(s.expect) + '</div>' : '')
       + '<div class="lb-mut">确定性断言 ' + esc(s.det) + ' 通过</div>'
       + aiHtml
       + '<div class="lb-file">' + esc(s.file) + '</div>'
-    + '</figcaption></figure>'
+    + '</figcaption></figure>';
+  lbBindZoom(lb.querySelector('#lb img, figure img'));
 }
 
 window.addEventListener('beforeunload', function () { if (S.poll) clearInterval(S.poll); });
