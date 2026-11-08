@@ -171,16 +171,16 @@ steps:
         expect: flash 内不得出现「未匹配」——3 家全部命中本店配置（同页检查，不 reload；reload 会清掉 flash 使断言空转。导入不齐时快速失败，避免抓价半途而费）
   - id: 抓价执行等待
     type: flow
-    expect: ②页当日逐酒店结果 reload 轮询 3 行（每家 ctrip+fliggy 两次 datasrc 调用，约 1 分钟内）
+    expect: ②页当日任务行 reload 轮询 9 行（一行 = 一个供应商任务，2026-11-09 用户拍板：3 家 × ctrip/elong/飞猪各一行）
     steps:
       - id: 当日3家都有抓价结果
         as: shop
         type: js_assert
         timeoutMs: 300000
         reload: true
-        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const jobOf = (r) => { const a = r.querySelector("a[href*=\"job_id\"]"); if (!a) return null; const m = a.textContent.trim().match(/^#(\d+)-/); return m ? m[1] : null; }; const first = jobOf(rows[0] || {}); if (!first) return false; const mine = rows.filter((r) => jobOf(r) === first); return mine.length === 3; })()'
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const jobOf = (r) => { const a = r.querySelector("a[href*=\"job_id\"]"); if (!a) return null; const m = a.textContent.trim().match(/^#(\d+)-/); return m ? m[1] : null; }; const first = jobOf(rows[0] || {}); if (!first) return false; const mine = rows.filter((r) => jobOf(r) === first); return mine.length === 9; })()'
         truthy: true
-        expect: 当日结果表按本次任务号圈定恰 3 行（reload 轮询等后台串跑完成）
+        expect: 当日结果表按本次任务号圈定恰 9 行（每家酒店 ctrip/elong/飞猪各一行；reload 轮询等后台串跑完成）
   - id: 模拟供应商认领
     type: flow
     expect: 场景以 datasrc e2e 供应商身份 claim 认领 app 派发的任务（pending→running）；随后顶层 foreach 逐任务 submit 房型价（running→completed）——app 轮询落定后取价落事件，「原来的」完整异步链路
