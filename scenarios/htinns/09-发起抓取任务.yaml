@@ -1,0 +1,205 @@
+# 场景九：价格维护 · ② 抓价——上传发起抓取任务 + 数据库验证（2026-11-08 定义）
+# 页面：/maintain/crawl（② 抓价执行页：批量上传弹窗 + 当日逐酒店结果表）
+# 数据纪律：复用固定夹具店 E2E-批量-1105-160745（shop_id=125，密码 123456）；
+#           2026-11-08 用户拍板「每一步独立使用酒店」：夹具店酒店**常驻不删**
+#           （场景 8 首跑导入 10 家，之后 upsert 幂等复用），本场景不再导入——
+#           前置只查店内有货（没货先跑场景 8），直接上传 3 行 scope 发起抓价
+# 关键口径（源码 crawl_operator.py / maintain_views._run_op）：
+#           ① ② 页上传 = _run_op("crawl")：Excel 必含「酒店名称」，resolve 后
+#              建统一任务（kind=crawl）+ task_progress(task_type=hotel_crawl)
+#           ② 每家酒店恒发 ctrip + fliggy 两来源（艺龙店加 elong）→ 3 家 = 6 条
+#              link_event(step=crawl, actual_value=JSON{price,rooms} 或 {error},
+#              confidence high/none) + 6 条 wf_step_log
+#           ③ 任务完成 = task_progress.status=done；明细 CSV 落盘可下载
+#           ④ 对标价数据源为内部 datasrc 服务（ctrip/飞猪爬虫库）——结果能否
+#              命中取决于 datasrc 是否有该酒店数据，界面上只能看到 成功/失败
+#              pill 与数值，完整明细须查库（本场景用 TestForge db 步骤直查）
+# 链路：基线登录 → 前置店内有货（scope 3 家在店，reload 轮询；没货先跑场景 8）
+#       → ②页上传发起（flash 共 3 行且无未匹配）→ ②页当日行 reload 轮询 3 行
+#       → 数据库验证（3 家酒店在 link_event、每家 ctrip+fliggy、task_progress
+#       done、wf_step_log 对齐、至少一家抓到对标价[warn]）→ 收尾保留酒店（不删）
+name: 发起抓取任务
+module: 价格维护
+description: 对应用户场景 9；价格维护②抓价——上传发起抓取任务，TestForge db 步骤直查 link_event / task_progress / wf_step_log 验证落库（界面看不到完整明细），收尾清空酒店
+version: 1
+trace: false
+requires:
+  env: [RATEMAP_ASSETS, HTINNS_DB]
+variables:
+  shopUser: "e2ebat_20261105160745"
+actors:
+  shop:
+    description: 夹具店铺身份（E2E-批量-1105-160745）
+    dialogs: accept
+steps:
+  - id: 店侧基线登录
+    type: flow
+    expect: 夹具店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 前置店内有货
+    type: flow
+    expect: 夹具店已有可抓价酒店（scope 3 家在店；酒店由场景 8 导入后常驻，本场景不导入不删除——每一步独立使用酒店，用户 2026-11-08 拍板）
+    steps:
+      - id: 打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 店内含3家scope酒店
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海湾湾voco酒店"); })()'
+        truthy: true
+        expect: 店内已有 scope 3 家（常驻）。若失败：酒店不在店——先跑场景 8（或 04 批量导入）建立酒店，再跑本场景
+  - id: 抓价页上传发起抓取任务  - id: 抓价页上传发起抓取任务
+    type: flow
+    expect: ②抓价执行页批量上传弹窗传 3 行 Excel，flash「任务 #N 已创建（共 3 行），结果见本页与任务页」
+    steps:
+      - id: 打开抓价执行页
+        as: shop
+        type: navigate
+        url: /maintain/crawl
+      - id: 等结果表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击批量上传
+        as: shop
+        type: click
+        selector: '#btn-launch'
+        waitFor: '#launchdlg[open]'
+        expect: 打开发起任务弹窗（必含酒店名称列提示）
+      - id: 上传抓价Excel
+        as: shop
+        type: upload
+        selector: '#launchdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/crawl-hotels.xlsx
+        expect: 选择抓价范围 Excel（3 行=导入同源，全匹配）
+      - id: 提交发起
+        as: shop
+        type: click
+        selector: '#launchdlg button[type="submit"]'
+      - id: flash任务已创建共3行
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("任务 #") && t.includes("已创建") && t.includes("共 3 行") && t.includes("结果见本页与任务页"); })()'
+        truthy: true
+        expect: flash「任务 #N 已创建（共 3 行…），结果见本页与任务页」（容忍「未匹配 X 行」后缀文本插断子串）
+      - id: flash无未匹配
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 15000
+        script: '(() => { return !document.body.textContent.includes("未匹配 1 行"); })()'
+        truthy: true
+        expect: 无「未匹配 1 行」——3 家全部命中本店配置（导入不齐时快速失败，避免抓价半途而费）
+  - id: 抓价执行等待
+    type: flow
+    expect: ②页当日逐酒店结果 reload 轮询 3 行（每家 ctrip+fliggy 两次 datasrc 调用，约 1 分钟内）
+    steps:
+      - id: 当日3家都有抓价结果
+        as: shop
+        type: js_assert
+        timeoutMs: 300000
+        reload: true
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const jobOf = (r) => { const a = r.querySelector("a[href*=\"job_id\"]"); if (!a) return null; const m = a.textContent.trim().match(/^#(\\d+)-/); return m ? m[1] : null; }; const first = jobOf(rows[0] || {}); if (!first) return false; const mine = rows.filter((r) => jobOf(r) === first); return mine.length === 3; })()'
+        truthy: true
+        expect: 当日结果表按本次任务号圈定恰 3 行（reload 轮询等后台串跑完成）
+  - id: 数据库验证抓取结果
+    type: flow
+    expect: TestForge db 步骤直查 htinns 库：link_event 6 条且来源各 3、task_progress 最新一条 done、wf_step_log 6 条、至少一家抓到对标价（warn）
+    steps:
+      - id: DB_link_event汇总
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(DISTINCT hotel_id) AS hotels, COUNT(*) AS total, COALESCE(SUM(source=''ctrip''),0) AS ctrip, COALESCE(SUM(source=''fliggy''),0) AS fliggy FROM link_event WHERE shop_id=125 AND biz_date=CURDATE() AND step=''crawl'''
+        minRows: 1
+        asserts:
+          - column: hotels
+            equals: "3"
+          - column: ctrip
+            equals: "3"
+          - column: fliggy
+            equals: "3"
+          - column: total
+            gte: "6"
+        expect: link_event 今日 shop 125 step=crawl：恰 3 家酒店、每家恒有 ctrip+fliggy（total≥6；艺龙供应商店另加 elong，条数随名单浮动）——界面只显示最后一次，完整留痕在库
+      - id: DB_至少一家抓到对标价
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT id, source, confidence, actual_value FROM link_event WHERE shop_id=125 AND biz_date=CURDATE() AND step=''crawl'' AND actual_value LIKE ''%"price"%'''
+        minRows: 1
+        expect: 至少一家酒店抓到对标价（actual_value 含 "price"）；warn 不作门禁——datasrc 是否命中取决于爬虫库有无该酒店数据，晚间偶发抖动
+        onFail: warn
+      - id: DB_task_progress已完成
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT id, task_type, status, total, done_count, fail_count FROM task_progress WHERE shop_id=125 AND task_type=''hotel_crawl'' ORDER BY id DESC LIMIT 1'
+        minRows: 1
+        asserts:
+          - column: status
+            equals: "done"
+          - column: total
+            equals: "3"
+        expect: 最新一条抓价任务进度 status=done 且 total=3（任务闭环）
+      - id: DB_wf_step_log审计
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n FROM wf_step_log WHERE shop_id=125 AND step=''crawl'' AND created_at >= CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            gte: "6"
+        expect: wf_step_log 今日 shop 125 step=crawl 审计 ≥6 条（每来源一条，与 link_event 对齐；艺龙店 elong 使总数浮动）
+teardown:
+  - id: 收尾保留酒店
+    type: flow
+    expect: 夹具店酒店常驻（2026-11-08 用户拍板每一步独立使用酒店）：不删除，仅确认 scope 3 家仍在店（重跑 upsert 幂等）
+    steps:
+      - id: 收尾打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 收尾等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾确认3家仍在店
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海湾湾voco酒店"); })()'
+        truthy: true
+        expect: scope 3 家仍常驻店内——后续步骤场景（③算价/④推送）继续复用

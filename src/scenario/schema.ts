@@ -190,6 +190,28 @@ const atomicSteps = z.discriminatedUnion("type", [
   }),
   z.object({
     ...stepCommon,
+    type: z.literal("db"),
+    /** MySQL 连接串 mysql://user:pass@host:port/db（密码走项目 secret 变量插值） */
+    dsn: z.string().min(1),
+    /** 查询语句（只应发 SELECT；结果集用于断言与证据落盘） */
+    sql: z.string().min(1),
+    /** 最少行数门禁 */
+    minRows: z.number().int().min(0).optional(),
+    /** 针对第一行的字段断言 */
+    asserts: z
+      .array(
+        z.object({
+          column: z.string().min(1),
+          equals: z.string().optional(),
+          contains: z.string().optional(),
+          /** 数值 ≥（行数/计数类断言） */
+          gte: z.string().optional(),
+        }),
+      )
+      .optional(),
+  }),
+  z.object({
+    ...stepCommon,
     type: z.literal("js_assert"),
     /** page.evaluate 的脚本：表达式或 () => value */
     script: z.string().min(1),
@@ -336,6 +358,21 @@ export const scenarioSchema = z
           code: "custom",
           path: seg,
           message: "extract 需要 into（写入的变量名）",
+        });
+      }
+      if (
+        st.type === "db" &&
+        (st.asserts ?? []).some(
+          (a) =>
+            a.equals === undefined &&
+            a.contains === undefined &&
+            a.gte === undefined,
+        )
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: seg,
+          message: "db.asserts 每条需要 equals / contains / gte 之一",
         });
       }
       if (

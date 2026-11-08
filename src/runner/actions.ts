@@ -15,6 +15,21 @@ export interface AIDriver {
   assert(expected: string, page: Page): Promise<boolean>;
 }
 
+/** db 步骤：直连 MySQL 执行只读查询，返回行集合（调用方负责断言）。 */
+export async function queryDb(
+  dsn: string,
+  sql: string,
+): Promise<Record<string, unknown>[]> {
+  const mysql = await import("mysql2/promise");
+  const conn = await mysql.createConnection(dsn);
+  try {
+    const [rows] = await conn.query(sql);
+    return rows as Record<string, unknown>[];
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
+
 export interface StepCtx {
   runtime: ActorRuntime;
   baseUrl: string;
@@ -480,6 +495,58 @@ export async function executeStep(
             errors.length === 0,
           );
           return errors.length === 0;
+        }
+        case "db": {
+          let rows: Record<string, unknown>[] = [];
+          try {
+            rows = await queryDb(step.dsn, step.sql);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            record(
+              out,
+              step,
+              "det",
+              "执行 SQL 查询",
+              `连接/查询失败：${msg.slice(0, 200)}`,
+              false,
+            );
+            return false;
+          }
+          const n = rows.length;
+          const minOk = step.minRows === undefined ? true : n >= step.minRows;
+          const notes: string[] = [];
+          let assertsOk = true;
+          for (const a of step.asserts ?? []) {
+            const v = rows[0]?.[a.column];
+            const s = v === undefined || v === null ? "" : String(v);
+            let pass: boolean;
+            let expectText: string;
+            if (a.equals !== undefined) {
+              pass = s === a.equals;
+              expectText = "=" + a.equals;
+            } else if (a.gte !== undefined) {
+              const num = Number(s);
+              pass = Number.isFinite(num) && num >= Number(a.gte);
+              expectText = "≥" + a.gte;
+            } else {
+              pass = s.includes(a.contains ?? "");
+              expectText = "包含 " + JSON.stringify(a.contains);
+            }
+            if (!pass) assertsOk = false;
+            notes.push(
+              `${a.column} ${expectText} → ${pass ? "✓" : "✗ 实际 " + JSON.stringify(s.slice(0, 160))}`,
+            );
+          }
+          const ok = minOk && assertsOk;
+          record(
+            out,
+            step,
+            "det",
+            `SQL 查询（minRows=${step.minRows ?? "—"}，字段断言 ${step.asserts?.length ?? 0} 条）`,
+            `返回 ${n} 行${n > 0 ? `；首行 ${JSON.stringify(rows[0]).slice(0, 240)}` : ""}${notes.length ? "；" + notes.join("；") : ""}`,
+            ok,
+          );
+          return ok;
         }
         case "js_assert": {
           const deadline = Date.now() + timeoutMs(step, ctx);

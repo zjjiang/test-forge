@@ -2,6 +2,9 @@
 # 页面：/maintain/filter（① 筛选执行页：批量上传弹窗 + 当日逐酒店结果表）
 #       /maintain/tasks（任务页：任务×子任务四步骤卡片，add-unified-job-subtask）
 # 数据纪律：复用固定夹具店 E2E-批量-1105-160745（shop_id=125，密码 123456）；
+#           2026-11-08 用户拍板「每一步独立使用酒店」：本场景导入的 10 家
+#           **常驻不删**（重跑 upsert 幂等，KPI 轮询首跑约 80s、重跑秒过），
+#           供 ②③④ 场景独立复用；工作流（一波流）是另一条链路
 #           筛选对象 = 10 家真实酒店：北京瑞麟湾温泉度假酒店（信科实测有
 #           「直签+供应商开票」产品，2026-11-06 29 家广测唯一命中）+ 原
 #           batch-import-10.xlsx 名单取 9 家（广测均无该类产品，作「无有效
@@ -26,7 +29,7 @@
 #       → /maintain/tasks 本次任务卡片：已结束 + 完成 1 / 失败 9 + 瑞麟湾行①筛选/最终=完成，
 #         其余 9 行失败（reload 轮询等后台串跑）→ 下载「① 筛选明细」CSV（表头校验）
 #       → 回①筛选页：当日逐酒店结果 10 行（恰 1 成功=瑞麟湾，9 失败，所属工作流 #N 链接）
-#       → 收尾逐行删除 10 家酒店（店铺酒店清空，不残留）
+#       → 收尾保留酒店（常驻供后续步骤场景复用，不删）
 name: 信科底价筛选
 module: 价格维护
 description: 对应用户场景 8；价格维护①筛选上传发起——10 家真实酒店批量筛选（1 家筛出底价瑞麟湾 + 9 家无有效底价对照），任务页任务×子任务卡片与明细 CSV 留痕（复用夹具店，收尾清空酒店）
@@ -235,9 +238,9 @@ steps:
         truthy: true
         expect: 以瑞麟湾行「子任务」链接 #N-行号 的任务号圈定本次 10 行——恰 1 行成功且是瑞麟湾、9 行失败；同日重跑会累积历史任务的行（旧任务酒店已删则名字回退显示 #SHID），断言按任务号圈定不受影响；该环节总结截图即筛选留痕
 teardown:
-  - id: 收尾删除10家筛选酒店
+  - id: 收尾保留酒店
     type: flow
-    expect: 行内删除按钮逐行清空 10 家酒店，跑完店铺酒店列表为空（不残留数据）
+    expect: 夹具店酒店常驻（2026-11-08 用户拍板每一步独立使用酒店）：不删除，确认 10 家仍在店（重跑 upsert 幂等）
     steps:
       - id: 收尾打开酒店管理页
         as: shop
@@ -247,121 +250,11 @@ teardown:
         as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 收尾删除第01家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第02家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第03家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第04家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第05家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第06家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第07家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第08家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第09家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾删除第10家
-        as: shop
-        type: click
-        selector: '.tbl tbody tr .btn-del'
-        when: 'document.querySelector(".tbl tbody tr .btn-del") !== null'
-        waitFor: '.content .flash'
-        onFail: warn
-      - id: 收尾等表格重渲染
-        as: shop
-        type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 收尾列表清空
+      - id: 收尾确认10家仍在店
         as: shop
         type: js_assert
         reload: true
-        timeoutMs: 15000
-        script: 'document.querySelectorAll(".tbl tbody tr .btn-del").length === 0 && !Array.from(document.querySelectorAll(".tbl tbody tr")).some((tr) => tr.querySelector("td b"))'
+        timeoutMs: 60000
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")).filter((tr) => tr.querySelector("td b")); return rows.length === 10; })()'
         truthy: true
-        expect: 收尾后无可删除酒店（空列表有占位行，按无 b 名称行断言）
+        expect: 10 家酒店仍常驻店内——②③④ 场景独立复用（若不足 10 行说明有酒店被删/信科取数失败，下次运行导入会补齐）
