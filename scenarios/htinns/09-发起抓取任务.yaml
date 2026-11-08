@@ -15,19 +15,21 @@
 #              命中取决于 datasrc 是否有该酒店数据，界面上只能看到 成功/失败
 #              pill 与数值，完整明细须查库（本场景用 TestForge db 步骤直查）
 # 链路：基线登录 → 前置店内有货（scope 3 家在店，reload 轮询；没货先跑场景 8）
-#       → 前置爬虫库投喂（datasrc vendor 接口：3 家建 ctrip 绑定 + 当日起住
-#       1 晚携程价；只走携程，飞猪不喂保持来源差异——用户 2026-11-08 拍板）
+#       → 前置爬虫库绑定（datasrc hotel_mapping：信科名→supplier_hotel_id，
+#         upsert 幂等——vendor 落定后 ctrip 按名读价走该映射）
 #       → ②页上传发起（flash 共 3 行且无未匹配）→ ②页当日行 reload 轮询 3 行
-#       → 数据库验证（3 家酒店在 link_event、每家 ctrip+fliggy、携程艺龙 ≥6 条
-#       带价、workflow_job steps_done、子任务无未匹配、wf_step_log 对齐）
+#       → 模拟供应商交付（claim 认领 app 派发的 vendor 任务 → foreach 逐任务
+#         submit 房型价——「原来的」完整异步链路，2026-11-09 用户拍板）
+#       → 数据库验证（link_event 不变式、携程艺龙 ≥6 条带价、vendor 快照
+#         ≥6 completed、workflow_job steps_done、子任务无未匹配、审计对齐）
 #       → 收尾保留酒店（不删）
 name: 发起抓取任务
 module: 价格维护
-description: 对应用户场景 9；价格维护②抓价——前置走 datasrc vendor 接口投喂当日携程数据（照原爬虫链路），上传发起抓取任务，TestForge db 步骤直查 link_event / workflow_job / wf_step_log 验证落库（界面看不到完整明细），收尾保留酒店
+description: 对应用户场景 9；价格维护②抓价——app 派发 datasrc vendor 任务，场景以 e2e 供应商身份 claim+submit 走通完整异步链路，db 步骤直查 link_event / crawl_vendor_task / workflow_job 验证落库，收尾保留酒店
 version: 1
 trace: false
 requires:
-  env: [RATEMAP_ASSETS, HTINNS_DB, DATASRC_URL]
+  env: [RATEMAP_ASSETS, HTINNS_DB, DATASRC_URL, DATASRC_VENDOR_KEY]
 variables:
   shopUser: "e2ebat_20261105160745"
 actors:
@@ -81,9 +83,9 @@ steps:
         script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海州湾voco酒店"); })()'
         truthy: true
         expect: 店内已有 scope 3 家（常驻）。若失败：酒店不在店——先跑场景 8（或 04 批量导入）建立酒店，再跑本场景
-  - id: 前置爬虫库投喂
+  - id: 前置爬虫库绑定
     type: flow
-    expect: 走 datasrc 正规 vendor 入库接口（照原爬虫投喂链路，用户 2026-11-08 拍板只走携程）：3 家各建「信科名→艺龙 supplier_hotel_id」绑定 + 当日起住 1 晚的携程房型价。飞猪不喂——其来源事件保持失败，恰好构成来源差异
+    expect: 3 家各 POST datasrc hotel_mapping（信科名→店里 supplier_hotel_id，upsert 幂等）——vendor 落定后 ctrip 按名读价走该映射；数据本身由「模拟供应商交付」环节经正规 submit 接口入库
     steps:
       - id: 绑定_安庆舍居民宿
         as: shop
@@ -97,23 +99,6 @@ steps:
         expectStatus: 200
         expectJson:
           code: 0
-      - id: 投喂_安庆舍居民宿
-        as: shop
-        type: http
-        method: POST
-        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_results
-        json:
-          hotel_info:
-            ctrip_id: "20522035"
-            hotel_name: 安庆舍居民宿
-            check_in_date: ${today:0}
-            check_out_date: ${today:1}
-            is_spider: 0
-          room_types:
-            - room_type: 标准大床房
-              bed_type: 大床
-              display_price: 288
-              breakfast_tag: 无早
       - id: 绑定_北京瑞麟湾
         as: shop
         type: http
@@ -126,23 +111,6 @@ steps:
         expectStatus: 200
         expectJson:
           code: 0
-      - id: 投喂_北京瑞麟湾
-        as: shop
-        type: http
-        method: POST
-        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_results
-        json:
-          hotel_info:
-            ctrip_id: "50101524"
-            hotel_name: 北京瑞麟湾温泉度假酒店
-            check_in_date: ${today:0}
-            check_out_date: ${today:1}
-            is_spider: 0
-          room_types:
-            - room_type: 温泉大床房
-              bed_type: 大床
-              display_price: 388
-              breakfast_tag: 含双早
       - id: 绑定_连云港海州湾
         as: shop
         type: http
@@ -155,23 +123,6 @@ steps:
         expectStatus: 200
         expectJson:
           code: 0
-      - id: 投喂_连云港海州湾
-        as: shop
-        type: http
-        method: POST
-        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_results
-        json:
-          hotel_info:
-            ctrip_id: "20237238"
-            hotel_name: 连云港海州湾voco酒店
-            check_in_date: ${today:0}
-            check_out_date: ${today:1}
-            is_spider: 0
-          room_types:
-            - room_type: 高级大床房
-              bed_type: 大床
-              display_price: 318
-              breakfast_tag: 含单早
   - id: 抓价页上传发起抓取任务
     type: flow
     expect: ②抓价执行页批量上传弹窗传 3 行 Excel，flash「任务 #N 已创建（共 3 行），结果见本页与任务页」
@@ -224,6 +175,48 @@ steps:
         script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const jobOf = (r) => { const a = r.querySelector("a[href*=\"job_id\"]"); if (!a) return null; const m = a.textContent.trim().match(/^#(\d+)-/); return m ? m[1] : null; }; const first = jobOf(rows[0] || {}); if (!first) return false; const mine = rows.filter((r) => jobOf(r) === first); return mine.length === 3; })()'
         truthy: true
         expect: 当日结果表按本次任务号圈定恰 3 行（reload 轮询等后台串跑完成）
+  - id: 模拟供应商认领
+    type: flow
+    expect: 场景以 datasrc e2e 供应商身份 claim 认领 app 派发的任务（pending→running）；随后顶层 foreach 逐任务 submit 房型价（running→completed）——app 轮询落定后取价落事件，「原来的」完整异步链路
+    steps:
+      - id: 等待派发完成
+        as: shop
+        type: wait
+        ms: 3000
+        expect: app 后台线程毫秒级 batch-create 完 6 个 vendor 任务（3 家 × ctrip/elong）
+      - id: 供应商认领任务
+        as: shop
+        type: http
+        method: GET
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/vendor/tasks?batch_size=50
+        headers:
+          X-Api-Key: ${var:DATASRC_VENDOR_KEY}
+        captureInto: claimed
+        expectStatus: 200
+        expectJson:
+          code: 0
+        expect: 认领本供应商全部 pending 任务（e2e 供应商专属，无污染）
+  - id: 供应商逐任务提交房型价
+    type: foreach
+    in: ${var:claimed.data.tasks}
+    item: task
+    expect: 每个认领到的任务提交一房一价（running→completed，幂等覆盖）
+    steps:
+      - id: 提交房型价
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/vendor/tasks/${var:item.task_id}/submit
+        headers:
+          X-Api-Key: ${var:DATASRC_VENDOR_KEY}
+        json:
+          rooms:
+            - room_name: 标准大床房
+              price: 288
+        expectStatus: 200
+        expectJson:
+          code: 0
+        expect: 提交 ${var:item.hotel_name} 的房型价
   - id: 数据库验证抓取结果
     type: flow
     expect: TestForge db 步骤直查 htinns 库：link_event 来源不变式、携程艺龙 ≥6 条带价、workflow_job steps_done 且子任务无未匹配、wf_step_log 对齐
@@ -231,8 +224,8 @@ steps:
       - id: 等待任务闭环
         as: shop
         type: wait
-        ms: 2000
-        expect: 等后台 spawn_single 把 workflow_job 落到 steps_done（页面行出现≠任务收尾完成，快跑时存在竞态——run 20261108-231717 实证）
+        ms: 10000
+        expect: 供应商提交后等 app 轮询（5s 间隔）到 completed 取价落事件、workflow_job 落 steps_done（页面行出现≠任务收尾完成）
       - id: DB_link_event汇总
         as: shop
         type: db
@@ -272,6 +265,16 @@ steps:
           - column: total
             equals: "3"
         expect: 最新一个统一抓价工作流任务 status=steps_done 且 total=3（任务闭环；task_progress 已被统一工作流表替代，2026-11-08 实测该表不再写入）
+      - id: DB_供应商任务快照完成
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS done FROM crawl_vendor_task WHERE shop_id=125 AND biz_date=CURDATE() AND status=''completed'' AND price IS NOT NULL'
+        minRows: 1
+        asserts:
+          - column: done
+            gte: "6"
+        expect: 本地 crawl_vendor_task 快照当日 ≥6 条 completed 且带价（3 家 × ctrip/elong）——vendor 链路闭环的直接证据
       - id: DB_子任务无未匹配
         as: shop
         type: db
