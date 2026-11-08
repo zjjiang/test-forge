@@ -151,8 +151,8 @@ steps:
         as: shop
         type: select
         selector: '#launchdlg select[name="vendor_name"]'
-        label: 携程供应商e2e
-        expect: 发起时选供应商（老平台口径）——选中 e2e，与后续模拟供应商环节对上
+        label: 携程供应商jasper
+        expect: 发起时选供应商（老平台口径，2026-11-09 用户拍板默认走 jasper）——选中 jasper，与后续模拟供应商环节对上
       - id: 提交发起
         as: shop
         type: click
