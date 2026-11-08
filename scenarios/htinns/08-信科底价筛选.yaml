@@ -1,31 +1,36 @@
-# 场景八：价格维护 · ① 筛选（信科底价）——10 家真实酒店批量筛选
-# 页面：/maintain/filter（价格维护执行页：发起任务弹窗 + 本工序最近任务表）
+# 场景八：价格维护 · ① 筛选（信科底价）——上传发起 + 10 家真实酒店批量筛选（2026-11-08 价格维护重做后 v3）
+# 页面：/maintain/filter（① 筛选执行页：批量上传弹窗 + 当日逐酒店结果表）
+#       /maintain/tasks（任务页：任务×子任务四步骤卡片，add-unified-job-subtask）
 # 数据纪律：复用固定夹具店 E2E-批量-1105-160745（shop_id=125，密码 123456）；
 #           筛选对象 = 10 家真实酒店：北京瑞麟湾温泉度假酒店（信科实测有
 #           「直签+供应商开票」产品，2026-11-06 29 家广测唯一命中）+ 原
 #           batch-import-10.xlsx 名单取 9 家（广测均无该类产品，作「无有效
 #           底价」对照），与场景 04 名单同源、upsert 幂等；
 #           先导入本店再筛选——resolve_rows 只匹配本店 hotel_config
-# 关键口径（源码 filter_operator.py / maintain_views._run_op）：
+# 关键口径（源码 maintain_views._run_op / workflow_job / workflow_status）：
 #           ① 无信科凭证 400——先配凭证（xk_shop_id 499 + XK_COOKIE）
 #           ② Excel 必含「酒店名称」列；未匹配行不静默丢（本版 10 行全匹配，
-#              flash 无「未匹配」后缀）
-#           ③ 逐家信科取底价进缓存（限速 0.5s），置信度 high=直连 / cached=缓存
-#           ④ 任务类型 hotel_filter，标签「① 筛选（信科底价）」；完成后产物
-#              task_<id>_result.csv，任务页「下载明细」可取
-#           ⑤ 标签过滤严格口径（2026-11-06 用户拍板）：仅保留 span 同时含
+#              flash 无「未匹配」后缀）；单步上传也建统一任务（open_job kind=filter）
+#           ③ 新版 flash：「任务 #N 已创建（共 M 行），结果见本页与任务页」
+#           ④ 任务页 job 卡片：任务 #N · 「① 筛选」 · filter-scope.xlsx · 10 个子任务
+#              · 已结束 · 完成 1 / 失败 9 · 「① 筛选明细」下载 chip（task done 且有产物才显示）
+#           ⑤ 逐酒店行：#job-行号 · 酒店 · ①筛选 pill（完成/失败）· ②③④ 对单步任务
+#              显示「—」· 最终状态 pill；失败原因不进任务页（在明细 CSV）
+#           ⑥ 任务类型 kind=filter；完成后产物 task_<id>_result.csv，路由 /tasks/<id>/download 不变
+#           ⑦ 标签过滤严格口径（2026-11-06 用户拍板）：仅保留 span 同时含
 #              「直签」+「供应商开票」的行。解析器工作正常（瑞麟湾筛出 6 房型）；
 #              多数酒店直签行标「酒店开票」故「解析后无有效底价」是正确业务结果
-#           ⑥ 底价随信科实时波动——断言任务计数与明细结构，不断言具体金额
+#           ⑧ 底价随信科实时波动——断言任务计数与明细结构，不断言具体金额
 # 链路：基线登录 → 配凭证 → 导入 10 家真实酒店（列表恰 10 行）
-#       → 筛选页发起任务（Excel 10 行，全匹配无未匹配）
-#       → /tasks 首行（本次任务）翻转为已完成 成功 1 / 失败 9（只认首行）
-#       → 下载筛选明细 CSV（首行下载链接，表头校验）→ 筛选页留痕（首行已完成 1/10）
+#       → ①筛选页上传范围 Excel（10 行全匹配，flash 任务 #N 已创建 共 10 行）
+#       → /maintain/tasks 本次任务卡片：已结束 + 完成 1 / 失败 9 + 瑞麟湾行①筛选/最终=完成，
+#         其余 9 行失败（reload 轮询等后台串跑）→ 下载「① 筛选明细」CSV（表头校验）
+#       → 回①筛选页：当日逐酒店结果 10 行（恰 1 成功=瑞麟湾，9 失败，所属工作流 #N 链接）
 #       → 收尾逐行删除 10 家酒店（店铺酒店清空，不残留）
 name: 信科底价筛选
 module: 价格维护
-description: 对应用户场景 8；价格维护①筛选——10 家真实酒店批量筛选，1 家筛出底价（瑞麟湾）+ 9 家无有效底价对照，任务进度与明细 CSV 留痕（复用夹具店，收尾清空酒店）
-version: 2
+description: 对应用户场景 8；价格维护①筛选上传发起——10 家真实酒店批量筛选（1 家筛出底价瑞麟湾 + 9 家无有效底价对照），任务页任务×子任务卡片与明细 CSV 留痕（复用夹具店，收尾清空酒店）
+version: 3
 trace: false
 requires:
   env: [RATEMAP_ASSETS, XK_COOKIE]
@@ -147,19 +152,19 @@ steps:
         script: 'document.querySelectorAll(".tbl tbody tr").length === 10'
         truthy: true
         expect: 酒店列表恰 10 行（含供应商酒店ID，筛选按它优先匹配）
-  - id: 筛选页发起筛选任务
+  - id: 筛选页上传发起筛选任务
     type: flow
-    expect: ①筛选执行页发起任务弹窗上传范围 Excel（10 行全匹配），flash 任务已创建且无未匹配
+    expect: ①筛选执行页批量上传弹窗传范围 Excel（10 行全匹配），flash「任务 #N 已创建（共 10 行），结果见本页与任务页」
     steps:
       - id: 打开筛选执行页
         as: shop
         type: navigate
         url: /maintain/filter
-      - id: 等任务表渲染
+      - id: 等结果表渲染
         as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 点击发起任务
+      - id: 点击批量上传
         as: shop
         type: click
         selector: '#btn-launch'
@@ -178,57 +183,63 @@ steps:
       - id: flash任务已创建共10行
         as: shop
         type: js_assert
-        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("任务已创建") && t.includes("共 10 行") && !t.includes("未匹配"); })()'
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("任务 #") && t.includes("已创建（共 10 行）") && t.includes("结果见本页与任务页") && !t.includes("未匹配"); })()'
         truthy: true
-        expect: flash 任务已创建（共 10 行）且无「未匹配」后缀——名单与导入同源，全部命中本店配置
-  - id: 任务进度留痕
+        expect: flash「任务 #N 已创建（共 10 行），结果见本页与任务页」且无「未匹配」后缀——单步上传也建统一任务，名单与导入同源全命中
+  - id: 任务页子任务卡片留痕
     type: flow
-    expect: /tasks 首行（=本次筛选任务，表按创建时间倒序）翻转为已完成 成功 1 / 失败 9——瑞麟湾筛出底价计成功，其余 9 家（无有效底价）计失败
+    expect: /maintain/tasks 本次任务条（jobbar，按 id 倒序最新）：已结束 + 完成 1 / 失败 9；平表内瑞麟湾行①筛选/最终=完成，其余 9 行①筛选=失败
     steps:
-      - id: 打开任务进度页
+      - id: 打开任务页
         as: shop
         type: navigate
-        url: /tasks
-      - id: 等任务表渲染
+        url: /maintain/tasks
+      - id: 等任务条渲染
         as: shop
         type: wait
-        selector: '.tblwrap table.tbl'
-      - id: 筛选任务已完成成功1失败9
+        selector: '.jobbar'
+      - id: 本次任务条已结束计数
         as: shop
         type: js_assert
         timeoutMs: 600000
         reload: true
-        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("筛选") && tr.textContent.includes("已完成") && tr.textContent.includes("成功 1 / 失败 9"); })()'
+        script: '(() => { const bar = Array.from(document.querySelectorAll(".jobbar")).find((c) => c.textContent.includes("filter-scope.xlsx") && c.textContent.includes("① 筛选")); if (bar === undefined) return false; const t = bar.textContent; return t.includes("已结束") && t.includes("完成 1") && t.includes("失败 9") && t.includes("10 个子任务") && t.includes("filter-scope.xlsx"); })()'
         truthy: true
-        expect: 首行「① 筛选（信科底价）」已完成，计数成功 1 / 失败 9（严格口径：瑞麟湾直签+供应商开票筛出底价；其余 9 家解析后无有效底价——正确业务结果）
+        expect: 任务条「任务 #N ·① 筛选 · filter-scope.xlsx · 10 个子任务 · 已结束 · 完成 1 / 失败 9」（严格口径：瑞麟湾直签+供应商开票筛出底价计完成；其余 9 家解析后无有效底价计失败——正确业务结果；reload 轮询等后台串跑，约 1 分钟）
+      - id: 瑞麟湾行完成其余9行失败
+        as: shop
+        type: js_assert
+        script: '(() => { const bar = Array.from(document.querySelectorAll(".jobbar")).find((c) => c.textContent.includes("filter-scope.xlsx") && c.textContent.includes("① 筛选")); if (bar === undefined) return false; const m = bar.textContent.match(/任务 #(\d+)/); if (!m) return false; const rows = Array.from(document.querySelectorAll(".tbl tbody tr")).filter((r) => r.cells[0].textContent.trim().startsWith("#" + m[1] + "-")); if (rows.length !== 10) return false; const rlw = rows.find((r) => r.textContent.includes("瑞麟湾")); if (rlw === undefined) return false; const rp = Array.from(rlw.querySelectorAll(".pill")).map((p) => p.textContent.trim()); const fails = rows.filter((r) => { const p = Array.from(r.querySelectorAll(".pill")).map((x) => x.textContent.trim()); return p[0] === "失败" && p[4] === "失败"; }).length; return rp[0] === "完成" && rp[4] === "完成" && fails === 9; })()'
+        truthy: true
+        expect: 平表内按任务号圈定本次恰 10 行子任务；瑞麟湾行①筛选 pill 与最终状态 pill 均「完成」（②③④ 单步任务显示「—」）；其余 9 行①筛选与最终均「失败」（失败原因在明细 CSV，不进任务页）
       - id: 下载筛选明细CSV
         as: shop
         type: download
-        click: '.tbl tbody tr:first-child a.chip[href*="/download"]'
+        click: '.jobbar a.chip[href*="/download"]'
         namePrefix: task_
         nameSuffix: .csv
         headerContains: 行号
-        expect: 本次任务明细 CSV 落盘，表头为「行号,酒店名称,匹配,最低价,房型数,置信度,失败原因」——成功行有最低价与房型数，失败行失败原因列为「解析后无有效底价」
-  - id: 筛选页留痕
+        expect: 本次任务条「① 筛选明细」chip 落盘 CSV，表头为「行号,酒店名称,匹配,最低价,房型数,置信度,失败原因」——成功行有最低价与房型数，失败行失败原因为「解析后无有效底价」
+  - id: 筛选页当日留痕
     type: flow
-    expect: 回①筛选执行页，本工序最近任务表首行（=本次任务）已完成 1/10——工序页面的执行留痕证据
+    expect: 回①筛选执行页：当日逐酒店结果 10 行——恰 1 行成功（瑞麟湾，底价列有值）9 行失败，所属工作流列带任务 #N 链接
     steps:
       - id: 回筛选执行页
         as: shop
         type: navigate
         url: /maintain/filter
-      - id: 等任务表渲染2
+      - id: 等结果表渲染2
         as: shop
         type: wait
         selector: '.tblwrap table.tbl'
-      - id: 首行任务已完成
+      - id: 当日逐酒店结果10行
         as: shop
         type: js_assert
         timeoutMs: 60000
         reload: true
-        script: '(() => { const tr = document.querySelector(".tbl tbody tr"); return tr !== null && tr.textContent.includes("已完成") && tr.textContent.includes("1/10"); })()'
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); const pill = (r) => Array.from(r.querySelectorAll(".pill")).map((p) => p.textContent.trim()); const rlw = rows.find((r) => r.textContent.includes("瑞麟湾")); if (rlw === undefined) return false; const link = rlw.querySelector("a[href*=\"job_id\"]"); if (!link) return false; const job = link.textContent.trim(); const mine = rows.filter((r) => Array.from(r.querySelectorAll("a")).some((a) => a.textContent.trim() === job)); const ok = mine.filter((r) => pill(r).includes("成功")); const bad = mine.filter((r) => pill(r).includes("失败")); return mine.length === 10 && ok.length === 1 && bad.length === 9 && ok.includes(rlw); })()'
         truthy: true
-        expect: 本工序任务表首行已完成、进度 1/10（每 tab 只看自己的运行结果）；该环节总结截图即筛选留痕
+        expect: 以瑞麟湾行「所属工作流」链接（本次任务 #N）圈定本次 10 行——恰 1 行成功且是瑞麟湾、9 行失败；同日重跑会累积历史任务的行（旧任务酒店已删则名字回退显示 #SHID），断言按任务号圈定不受影响；该环节总结截图即筛选留痕
 teardown:
   - id: 收尾删除10家筛选酒店
     type: flow
