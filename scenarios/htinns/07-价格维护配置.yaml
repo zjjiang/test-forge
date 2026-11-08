@@ -1,18 +1,28 @@
-# 场景七：价格维护 · 信科分组映射 Excel 批量导入（参考老平台 handlers.py:561-571 同语义）
-# 页面：/maintain/config（信科分组映射，xk_rate_config 表）
+# 场景七：价格维护 · 配置页（标签设置 + 水位设置）
+# 页面：/maintain/config 标签设置（信科分组映射，xk_rate_config，老平台 handlers.py:561-571 同语义）
+#       /maintain/config/watermark 水位设置（price_loop_watermark，specs v2/price-timeliness-loop，
+#       2026-11-07 拍板 UI：白名单店可拨，两段式二次确认，操作落 wf_step_log 审计）
 # 数据纪律：复用固定夹具店 E2E-批量-1105-160745（shop_id=125，初始密码 123456），不新增店铺；
 #           xlsx 行数据取自生产库 shop 10 的真实 rate→tag_id 映射（不是编造值）；
 #           夹具目录放项目变量 RATEMAP_ASSETS（路径即配置，换文件=换数据）
-# 关键口径（源码 ratemap.py import_xlsx）：
-#           ① 表头必须恰为 rate/tag_id/is_active，否则整文件拒绝（「导入失败：表头须为…」）
-#           ② 导入 = 整店替换（先删后插单事务），不是追加——任一行非法（如 tag_id 空）整体拒绝、旧数据不破坏
-#           ③ 列表按 id 倒序 → 最后导入的一行显示在最上（首行断言用文件末行）
-# 链路：基线登录 → 配置页基线 → 导入 5 行 → 列表恰 5 行（首行=文件末行 -31/4897）
-#       → 再导入 3 行验证整店替换（恰 3 行、旧行消失）→ 非法表头拒绝且数据不破坏
-#       → 导出 xlsx 落盘 → 收尾导入空表清空（导入完成：0 行，店铺映射为空）
-name: 信科分组映射批量导入
+# 环境前置：htinns .env 须 PRICE_LOOP_SHOPS=7,125（125 必须在循环白名单，否则水位页无拨回表单、
+#           POST 直接 403）；price_loop_watermark 表已由 sqls/2026-11-07_price_loop_watermark.sql 建好
+# 关键口径（源码 maintain_views.py config_import / config_watermark + ratemap.py import_xlsx）：
+#           ① 标签导入表头必须恰为 rate/tag_id/is_active，否则整文件拒绝（「导入失败：表头须为…」）
+#           ② 标签导入 = 整店替换（先删后插单事务），任一行非法整体拒绝、旧数据不破坏
+#           ③ 标签列表按 id 倒序 → 最后导入的一行显示在最上（首行断言用文件末行）
+#           ④ 水位拨回两段式：无 confirm=1 只渲染影响估算页（估算 = datasrc 增量流 id>new 的规模，
+#              只读），confirm=1 才写库并落审计（[水位拨回] 店 X：cur → new（操作人 …））
+# 链路：基线登录 → 标签导入 5 行 → 列表恰 5 行（首行 -31/4897）→ 再导入 3 行验证整店替换
+#       → 非法表头拒绝且数据不破坏 → 导出 xlsx 落盘 → 水位页基线（当前值未设置+拨回表单在）
+#       → 拨回两段式（→ 12345，确认页估算 → 确认后 flash+当前值+审计三证）
+#       → 二次拨回验证读回（extract 抓当前值 → 确认页「当前值 → 99999」，证明 get() 读回正确；
+#         水位是持久状态，断言不依赖起点，可重复执行）
+# 收尾：导入空表清空标签映射（导入完成：0 行）；水位行与审计行为夹具店残留（店 125 无酒店，
+#       水位值不参与任何循环计算，惰性无害；UI 无删除入口，文档说明代替清理）
+name: 价格维护配置（标签设置+水位设置）
 module: 价格维护
-description: 对应用户场景 7；价格维护配置页 xlsx 批量导入——表头校验、整店替换、失败不破坏、导出落盘（复用夹具店，收尾清空映射）
+description: 对应用户场景 7 重做；价格维护配置页两个二级 tab——标签设置 xlsx 批量导入（表头校验/整店替换/失败不破坏/导出落盘/收尾清空）+ 水位设置两段式拨回（估算确认页、审计留痕、二次拨回验证读回）
 version: 1
 trace: false
 requires:
@@ -50,9 +60,9 @@ steps:
         as: shop
         type: wait
         selector: '.topbar .usermenu'
-  - id: 打开配置页基线
+  - id: 标签设置页基线
     type: flow
-    expect: /maintain/config 信科分组映射页可打开，表格渲染（基线映射数不限——整店替换语义使起点无关）
+    expect: /maintain/config 信科分组映射页可打开，二级 tab（标签设置/水位设置）渲染（基线映射数不限——整店替换语义使起点无关）
     steps:
       - id: 打开信科分组映射页
         as: shop
@@ -62,6 +72,12 @@ steps:
         as: shop
         type: wait
         selector: '.tblwrap table.tbl'
+      - id: 二级tab渲染
+        as: shop
+        type: js_assert
+        script: '(() => { const t = document.body.textContent; return t.includes("标签设置") && t.includes("水位设置") && t.includes("任务") && t.includes("① 筛选"); })()'
+        truthy: true
+        expect: 价格维护子 tab（任务/①筛选…④推送/配置）与配置二级 tab（标签设置/水位设置）都在
       - id: 基线映射为空
         as: shop
         type: js_assert
@@ -204,10 +220,117 @@ steps:
         namePrefix: xk_rate_config_shop125
         nameSuffix: .xlsx
         expect: 导出文件下载成功（文件名含店号，可直接回导——导出/导入闭环）
+  - id: 水位设置页基线
+    type: flow
+    expect: /maintain/config/watermark 水位页可打开：当前值未设置、拨回表单在、无白名单排除提示（125 在 PRICE_LOOP_SHOPS）
+    steps:
+      - id: 打开水位设置页
+        as: shop
+        type: navigate
+        url: /maintain/config/watermark
+      - id: 等水位卡片渲染
+        as: shop
+        type: wait
+        selector: 'form[action$="/maintain/config/watermark"]'
+      - id: 当前值标签渲染
+        as: shop
+        type: js_assert
+        script: '(() => { return document.body.textContent.includes("当前值"); })()'
+        truthy: true
+        expect: 水位卡片渲染出「当前值」（未设置或数字均可——水位是持久状态，可重复执行不依赖起点）
+      - id: 白名单店有拨回表单
+        as: shop
+        type: js_assert
+        script: '(() => { const f = document.querySelector("form[action$=\"/maintain/config/watermark\"]"); return f !== null && f.querySelector("input[name=\"watermark\"]") !== null && !document.body.textContent.includes("不在循环白名单"); })()'
+        truthy: true
+        expect: 拨回表单与数字输入在、且无「本店未在 PRICE_LOOP_SHOPS 白名单」提示——环境前置（.env 白名单含 125）在此验证
+  - id: 水位拨回两段式确认
+    type: flow
+    expect: 拨回 12345 走两段式：第一段只出估算确认页不生效，确认后才写库（flash+当前值+审计三证）
+    steps:
+      - id: 填写拨回目标12345
+        as: shop
+        type: fill
+        selector: 'form[action$="/maintain/config/watermark"] input[name="watermark"]'
+        value: "12345"
+        expect: 拨回至 12345（夹具店无酒店，datasrc 增量流估算约 0 条，重放无实际影响）
+      - id: 第一段提交弹确认框
+        as: shop
+        type: click
+        selector: 'form[action$="/maintain/config/watermark"] button[type="submit"]'
+        waitFor: '.card-h'
+        expect: 浏览器 confirm 弹窗自动接受，进入水位拨回·二次确认页
+      - id: 确认页显示估算未生效
+        as: shop
+        type: js_assert
+        script: '(() => { const t = document.body.textContent; return t.includes("二次确认") && t.includes("12345") && t.includes("影响规模") && t.includes("确认拨回"); })()'
+        truthy: true
+        expect: 确认页显示 店 125 水位 → 12345 与影响规模估算——此时只是预览，未写库（当前旧值随运行状态可能是未设置或上次残留值）
+      - id: 第二段确认拨回
+        as: shop
+        type: click
+        selector: 'form[action$="/maintain/config/watermark"] button[type="submit"]'
+        expect: 点击确认拨回（confirm=1）真正生效并回水位页
+      - id: flash拨回成功
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("水位已拨回") && t.includes("12345"); })()'
+        truthy: true
+        expect: flash 提示水位已拨回且目标值 12345
+      - id: 当前值与审计三证
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: '(() => { const t = document.body.textContent; return t.includes("12345") && t.includes("最近拨回审计") && t.includes("[水位拨回] 店 125"); })()'
+        truthy: true
+        expect: 当前值变为 12345、出现「最近拨回审计」表且留痕「[水位拨回] 店 125 … → 12345（操作人 …）」——写库+审计双落
+  - id: 二次拨回验证读回
+    type: flow
+    expect: 抓当前值做基线，再拨回 99999：确认页显示「当前值 → 99999」（证明 get() 读回 cur 正确），确认后当前值 99999
+    steps:
+      - id: 重新打开水位页
+        as: shop
+        type: navigate
+        url: /maintain/config/watermark
+      - id: 抓取当前水位值
+        as: shop
+        type: extract
+        selector: 'p.note b'
+        into: cur_wm
+        expect: 抓「当前值：<b>N</b>」里的 N（上一段刚写入的 12345）——供确认页读回断言
+      - id: 填写拨回目标99999
+        as: shop
+        type: fill
+        selector: 'form[action$="/maintain/config/watermark"] input[name="watermark"]'
+        value: "99999"
+      - id: 提交弹确认框
+        as: shop
+        type: click
+        selector: 'form[action$="/maintain/config/watermark"] button[type="submit"]'
+        waitFor: '.card-h'
+      - id: 确认页显示旧值读回
+        as: shop
+        type: js_assert
+        script: '(() => { const t = document.body.textContent; return t.includes("99999") && t.includes("${var:cur_wm}") && !t.includes("未设置"); })()'
+        truthy: true
+        expect: 确认页显示「${var:cur_wm} → 99999」且不再有「未设置」——上一段写入的值被 get() 正确读回（读写闭环）
+      - id: 确认第二段拨回
+        as: shop
+        type: click
+        selector: 'form[action$="/maintain/config/watermark"] button[type="submit"]'
+      - id: 当前值更新为99999
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: '(() => { const t = document.body.textContent; return t.includes("水位已拨回") && t.includes("99999") && t.includes("[水位拨回] 店 125"); })()'
+        truthy: true
+        expect: flash + 当前值 + 审计（12345 → 99999）三证齐——二次拨回全链路通过
 teardown:
   - id: 收尾导入空表清空映射
     type: flow
-    expect: 导入仅表头的空 xlsx 清空全店映射（导入完成：0 行），跑完店铺映射为空（不残留数据）
+    expect: 导入仅表头的空 xlsx 清空全店标签映射（导入完成：0 行），跑完店铺映射为空（不残留数据）
     steps:
       - id: 收尾打开配置页
         as: shop
