@@ -186,40 +186,34 @@ steps:
         script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("任务 #") && t.includes("已创建（共 10 行）") && t.includes("结果见本页与任务页") && !t.includes("未匹配"); })()'
         truthy: true
         expect: flash「任务 #N 已创建（共 10 行），结果见本页与任务页」且无「未匹配」后缀——单步上传也建统一任务，名单与导入同源全命中
-  - id: 任务页子任务卡片留痕
+  - id: 任务页子任务平表留痕
     type: flow
-    expect: /maintain/tasks 本次任务条（jobbar，按 id 倒序最新）：已结束 + 完成 1 / 失败 9；平表内瑞麟湾行①筛选/最终=完成，其余 9 行①筛选=失败
+    expect: /maintain/tasks 分页平表（任务条已去重）：按首行任务号圈定本次恰 10 行；瑞麟湾行①筛选/最终=完成，其余 9 行①筛选=失败
     steps:
       - id: 打开任务页
         as: shop
         type: navigate
         url: /maintain/tasks
-      - id: 等任务条渲染
+      - id: 等平表渲染
         as: shop
         type: wait
-        selector: '.jobbar'
-      - id: 本次任务条已结束计数
+        selector: '.tbl tbody tr'
+      - id: 本次任务10行瑞麟湾完成
         as: shop
         type: js_assert
         timeoutMs: 600000
         reload: true
-        script: '(() => { const bar = Array.from(document.querySelectorAll(".jobbar")).find((c) => c.textContent.includes("filter-scope.xlsx") && c.textContent.includes("① 筛选")); if (bar === undefined) return false; const t = bar.textContent; return t.includes("已结束") && t.includes("完成 1") && t.includes("失败 9") && t.includes("10 个子任务") && t.includes("filter-scope.xlsx"); })()'
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); if (!rows.length) return false; const m = rows[0].cells[0].textContent.trim().match(/^#(\d+)-/); if (!m) return false; const mine = rows.filter((r) => r.cells[0].textContent.trim().startsWith("#" + m[1] + "-")); if (mine.length !== 10) return false; const rlw = mine.find((r) => r.textContent.includes("瑞麟湾")); if (rlw === undefined) return false; const rp = Array.from(rlw.querySelectorAll(".pill")).map((p) => p.textContent.trim()); const fails = mine.filter((r) => { const p = Array.from(r.querySelectorAll(".pill")).map((x) => x.textContent.trim()); return p[0] === "失败" && p[4] === "失败"; }).length; return rp[0] === "完成" && rp[4] === "完成" && fails === 9; })()'
         truthy: true
-        expect: 任务条「任务 #N ·① 筛选 · filter-scope.xlsx · 10 个子任务 · 已结束 · 完成 1 / 失败 9」（严格口径：瑞麟湾直签+供应商开票筛出底价计完成；其余 9 家解析后无有效底价计失败——正确业务结果；reload 轮询等后台串跑，约 1 分钟）
-      - id: 瑞麟湾行完成其余9行失败
-        as: shop
-        type: js_assert
-        script: '(() => { const bar = Array.from(document.querySelectorAll(".jobbar")).find((c) => c.textContent.includes("filter-scope.xlsx") && c.textContent.includes("① 筛选")); if (bar === undefined) return false; const m = bar.textContent.match(/任务 #(\d+)/); if (!m) return false; const rows = Array.from(document.querySelectorAll(".tbl tbody tr")).filter((r) => r.cells[0].textContent.trim().startsWith("#" + m[1] + "-")); if (rows.length !== 10) return false; const rlw = rows.find((r) => r.textContent.includes("瑞麟湾")); if (rlw === undefined) return false; const rp = Array.from(rlw.querySelectorAll(".pill")).map((p) => p.textContent.trim()); const fails = rows.filter((r) => { const p = Array.from(r.querySelectorAll(".pill")).map((x) => x.textContent.trim()); return p[0] === "失败" && p[4] === "失败"; }).length; return rp[0] === "完成" && rp[4] === "完成" && fails === 9; })()'
-        truthy: true
-        expect: 平表内按任务号圈定本次恰 10 行子任务；瑞麟湾行①筛选 pill 与最终状态 pill 均「完成」（②③④ 单步任务显示「—」）；其余 9 行①筛选与最终均「失败」（失败原因在明细 CSV，不进任务页）
+        expect: 平表按子任务号圈定本次（首行 #N-1 的任务号）恰 10 行；瑞麟湾行①筛选 pill 与最终状态 pill 均「完成」（严格口径：直签+供应商开票筛出底价计完成）；其余 9 行均「失败」（解析后无有效底价——正确业务结果）；②③④ 单步任务显示「—」；reload 轮询等后台串跑约 1 分钟
       - id: 下载筛选明细CSV
         as: shop
         type: download
-        click: '.jobbar a.chip[href*="/download"]'
+        click: '.tbl tbody tr a.chip[href*="/download"]'
         namePrefix: task_
         nameSuffix: .csv
         headerContains: 行号
-        expect: 本次任务条「① 筛选明细」chip 落盘 CSV，表头为「行号,酒店名称,匹配,最低价,房型数,置信度,失败原因」——成功行有最低价与房型数，失败行失败原因为「解析后无有效底价」
+        expect: 首行（本次任务）操作列「① 筛选明细」chip 落盘 CSV，表头为「行号,酒店名称,匹配,最低价,房型数,置信度,失败原因」——成功行有最低价与房型数，失败行失败原因为「解析后无有效底价」
   - id: 筛选页当日留痕
     type: flow
     expect: 回①筛选执行页：当日逐酒店结果 10 行——恰 1 行成功（瑞麟湾，底价列有值）9 行失败，所属工作流列带任务 #N 链接
