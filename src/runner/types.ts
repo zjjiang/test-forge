@@ -30,6 +30,8 @@ export interface StepResult {
   assertions: AssertionRecord[];
   error: string;
   shots: string[];
+  /** teardown 步骤标记：失败只记 warning，不参与场景判定 */
+  teardown?: boolean;
   /** type=flow 时：环节内子步骤记录 */
   subSteps?: SubStepResult[];
 }

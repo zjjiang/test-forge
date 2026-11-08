@@ -168,7 +168,6 @@ export async function runScenario(
   const stepTimeoutMs = scenario.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const startedAt = new Date().toISOString();
   const stepResults: StepResult[] = [];
-  let mainCount = 0;
   const warnings: { where: string; message: string }[] = [];
   try {
     for (const name of actorNames) {
@@ -198,9 +197,10 @@ export async function runScenario(
       const actorName = step.as ?? actorNames[0] ?? "";
       const runtime = runtimes.get(actorName);
       if (runtime === undefined) {
-        stepResults.push(
-          emptyStep(i, step, actorName, "skipped", `actor ${actorName} 未打开`),
-        );
+        stepResults.push({
+          ...emptyStep(i, step, actorName, "skipped", `actor ${actorName} 未打开`),
+          teardown,
+        });
         return;
       }
       /* foreach 在步骤列表层展开：解析数组变量（不做字符串插值，数组保持原值）
@@ -327,6 +327,7 @@ export async function runScenario(
         type: step.type,
         actor: actorName,
         expect: step.expect ?? "",
+        teardown,
         status,
         ms: result.attempts.reduce((s, a) => s + a.ms, 0),
         attempts: result.attempts,
@@ -351,7 +352,6 @@ export async function runScenario(
           message: result.error,
         });
     };
-    mainCount = scenario.steps.length;
     for (const [i, step] of scenario.steps.entries())
       await runStep(step, i, false);
     if (scenario.teardown !== undefined) {
@@ -378,8 +378,9 @@ export async function runScenario(
     await browser.close().catch(() => undefined);
   }
 
-  const status = verdict(stepResults.slice(0, mainCount));
-  for (const t of stepResults.slice(mainCount)) {
+  /* foreach 子步骤会插入 stepResults，不能按 index 切主/收尾——用显式标记过滤 */
+  const status = verdict(stepResults.filter((r) => !r.teardown));
+  for (const t of stepResults.filter((r) => r.teardown)) {
     if (t.status === "failed" || t.status === "warned") {
       warnings.push({
         where: `teardown ${t.stepId}`,
