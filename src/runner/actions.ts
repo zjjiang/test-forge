@@ -41,8 +41,8 @@ export interface StepCtx {
     phase: "before" | "after" | "fail",
     rt?: ActorRuntime,
   ) => Promise<void>;
-  /** extract 步骤写 run 内变量，供后续步骤 ${var:NAME} 引用 */
-  setVar: (name: string, value: string) => void;
+  /** extract/http captureInto 步骤写 run 内变量（值可为对象/数组），供 ${var:NAME.path} 引用 */
+  setVar: (name: string, value: unknown) => void;
   /** download 步骤的落盘位置（证据目录 downloads/ 下） */
   downloadPath: (suggestedName: string) => string;
   /** 当前变量快照（flow 子步骤执行时逐个重新插值用），可缺省 */
@@ -464,9 +464,12 @@ export async function executeStep(
             step.json !== undefined
               ? {
                   data: JSON.stringify(step.json),
-                  headers: { "content-type": "application/json" },
+                  headers: {
+                    "content-type": "application/json",
+                    ...(step.headers ?? {}),
+                  },
                 }
-              : {};
+              : { headers: step.headers ?? {} };
           const res = await ctx.runtime.context.request.fetch(url, {
             method: step.method,
             form: step.json !== undefined ? undefined : step.form,
@@ -475,6 +478,14 @@ export async function executeStep(
             failOnStatusCode: false,
           });
           const status = res.status();
+          if (step.captureInto !== undefined) {
+            try {
+              const body = (await res.json()) as unknown;
+              ctx.setVar(step.captureInto, body);
+            } catch {
+              // 响应非 JSON：照常走断言路径，错误在 expect 处理中体现
+            }
+          }
           const errors: string[] = [];
           if (step.expectStatus !== undefined && status !== step.expectStatus)
             errors.push(`状态码期望 ${step.expectStatus}，实际 ${status}`);
@@ -555,6 +566,18 @@ export async function executeStep(
             ok,
           );
           return ok;
+        }
+        case "foreach": {
+          // foreach 由 runner 在步骤列表层展开（runStep 递归）；flow 内到不了那里
+          record(
+            out,
+            step,
+            "det",
+            "foreach",
+            "foreach 不能嵌在 flow 里——放到顶层步骤或 teardown",
+            false,
+          );
+          return false;
         }
         case "js_assert": {
           const deadline = Date.now() + timeoutMs(step, ctx);

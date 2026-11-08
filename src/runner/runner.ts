@@ -5,7 +5,7 @@ import type { Store } from "../store/db.js";
 import { createRun, finishRun, type RunRow } from "../store/runs.js";
 import { varSnapshot } from "../store/vars.js";
 import type { Scenario, Step } from "../scenario/schema.js";
-import { interpolateDeep } from "../scenario/interpolate.js";
+import { interpolateDeep, resolveVarPath } from "../scenario/interpolate.js";
 import { openActor, type ActorRuntime } from "./env.js";
 import { executeStep, freezeAndShot, type AIDriver } from "./actions.js";
 import { makeRedactor } from "./redact.js";
@@ -138,7 +138,7 @@ export async function runScenario(
     ...(opts.varsOverride ?? {}),
   });
   // extract 步骤写入的 run 内变量，每步执行时合并插值
-  let runtimeVars: Record<string, string> = {};
+  let runtimeVars: Record<string, unknown> = {};
   const stepVars = (): Record<string, unknown> => ({ ...vars, ...runtimeVars });
   // actors/guards 先插值；steps 留到逐条执行时插（extract 的变量运行中才存在）
   const resolvedActors = interpolateDeep(scenario.actors, vars);
@@ -201,6 +201,65 @@ export async function runScenario(
         stepResults.push(
           emptyStep(i, step, actorName, "skipped", `actor ${actorName} 未打开`),
         );
+        return;
+      }
+      /* foreach 在步骤列表层展开：解析数组变量（不做字符串插值，数组保持原值）
+         → 逐元素把元素挂进运行时变量（${var:as} / ${var:as.field}），
+         子步骤按普通步骤递归执行 */
+      if (step.type === "foreach") {
+        const t0 = Date.now();
+        let err = "";
+        let total = 0;
+        try {
+          const m = /^\$\{var:([A-Za-z][A-Za-z0-9_.]*)\}$/.exec(step.in.trim());
+          if (m === null)
+            throw new Error("foreach in 需要 ${var:NAME} 形式的数组变量引用");
+          const value = resolveVarPath(m[1]!, stepVars());
+          if (!Array.isArray(value))
+            throw new Error(`foreach in 解析结果不是数组（${m[1]}）`);
+          total = value.length;
+          log(`FOREACH ${step.id ?? step.item} 共 ${total} 项`);
+          for (const [k, item] of value.entries()) {
+            runtimeVars = { ...runtimeVars, [step.item]: item };
+            log(`FOREACH item ${k + 1}/${total}`);
+            for (const sub of step.steps) {
+              await runStep(sub, i, teardown);
+            }
+          }
+        } catch (e) {
+          err = e instanceof Error ? e.message : String(e);
+        }
+        stepResults.push({
+          index: i,
+          stepId: step.id ?? step.type,
+          type: step.type,
+          actor: actorName,
+          expect: step.expect ?? "",
+          status:
+            err === ""
+              ? "passed"
+              : step.onFail === "warn"
+                ? "warned"
+                : "failed",
+          error: err,
+          ms: Date.now() - t0,
+          attempts: [],
+          assertions:
+            err === ""
+              ? [
+                  {
+                    stepId: step.id ?? step.type,
+                    type: step.type,
+                    kind: "det",
+                    expectedText: `迭代 ${step.in} 执行子步骤`,
+                    actualText: `共 ${total} 个元素`,
+                    ok: true,
+                    at: new Date().toISOString(),
+                  },
+                ]
+              : [],
+          shots: [],
+        });
         return;
       }
       const stepShots: string[] = [];

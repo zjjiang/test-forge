@@ -1,7 +1,8 @@
 import { z } from "zod";
 
-/** 变量引用形如 ${var:NAME}，见 interpolate.ts。带 g 标志供 replace 全量替换。 */
-export const VAR_REF = /\$\{var:([A-Za-z][A-Za-z0-9_]*)\}/g;
+/** 变量引用形如 ${var:NAME} 或点路径 ${var:ITEM.field}（foreach 元素等对象值），
+ * 见 interpolate.ts。带 g 标志供 replace 全量替换。 */
+export const VAR_REF = /\$\{var:([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)\}/g;
 
 const slugKey = z
   .string()
@@ -186,6 +187,10 @@ const atomicSteps = z.discriminatedUnion("type", [
     form: z.record(z.string(), z.string()).optional(),
     /** JSON 请求体（datasrc 投喂等只收 JSON 的接口）；与 form 二选一，同时给时 json 优先 */
     json: z.record(z.string(), z.unknown()).optional(),
+    /** 附加请求头（如 X-Api-Key，值支持 ${var:} 插值） */
+    headers: z.record(z.string(), z.string()).optional(),
+    /** 响应 JSON 存入 run 内变量（配合 ${var:NAME.path} 点路径/foreach 用） */
+    captureInto: slugKey.optional(),
     /** 不跟随重定向（断言 302 时用） */
     maxRedirects: z.number().int().min(0).max(20).optional(),
     expectStatus: z.number().int().min(200).max(599).optional(),
@@ -253,6 +258,16 @@ const stepSchema = z.discriminatedUnion("type", [
     type: z.literal("flow"),
     /** 环节内原子子步骤（不能再嵌 flow），跑完拍一张环节截图 */
     steps: z.array(atomicSteps).min(1).max(60),
+  }),
+  z.object({
+    ...stepCommon,
+    type: z.literal("foreach"),
+    /** 迭代的数组：${var:NAME} 或点路径表达式，解析结果必须是数组 */
+    in: z.string().min(1),
+    /** 迭代变量名（子步骤用 ${var:ITEM} / ${var:ITEM.field} 取当前元素） */
+    item: slugKey,
+    /** 每个元素执行的原子子步骤（不能嵌套 foreach/flow） */
+    steps: z.array(atomicSteps).min(1).max(50),
   }),
 ]);
 

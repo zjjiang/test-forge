@@ -26,9 +26,27 @@ const todayIso = (offsetDays: number): string => {
   return `${d.getFullYear()}-${month}-${day}`;
 };
 
+/** 点路径取值：a.b.c 逐层下钻；任一层缺名字段即按未定义变量报错。 */
+export const resolveVarPath = (path: string, vars: VarTable): unknown => {
+  const [root = "", ...rest] = path.split(".");
+  if (!(root in vars)) throw new InterpolationError(root, Object.keys(vars));
+  let cur: unknown = vars[root];
+  for (const seg of rest) {
+    if (cur === null || typeof cur !== "object") {
+      throw new InterpolationError(path, Object.keys(vars));
+    }
+    const holder = cur as Record<string, unknown>;
+    if (!(seg in holder)) throw new InterpolationError(path, Object.keys(vars));
+    cur = holder[seg];
+  }
+  if (cur === null || cur === undefined)
+    throw new InterpolationError(path, Object.keys(vars));
+  return cur;
+};
+
 /**
  * 插值字符串：
- * - ${var:NAME} 换成变量值（值转字符串；未定义直接报错，不静默留空）
+ * - ${var:NAME} / ${var:NAME.field} 换成变量值（值转字符串；未定义直接报错，不静默留空）
  * - ${today:N} 换成相对日期，供爬虫库投喂等按当天日期造数的场景
  */
 export function interpolate(raw: string, vars: VarTable): string {
@@ -36,10 +54,7 @@ export function interpolate(raw: string, vars: VarTable): string {
     todayIso(Number(off)),
   );
   return withDates.replace(VAR_REF, (_whole, name: string) => {
-    if (!(name in vars)) throw new InterpolationError(name, Object.keys(vars));
-    const v = vars[name];
-    if (v === null || v === undefined)
-      throw new InterpolationError(name, Object.keys(vars));
+    const v = resolveVarPath(name, vars);
     return String(v);
   });
 }

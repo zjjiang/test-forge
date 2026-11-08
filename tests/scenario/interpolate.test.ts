@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { InterpolationError, interpolate, interpolateDeep } from '../../src/scenario/interpolate.js';
+import {
+	InterpolationError,
+	interpolate,
+	interpolateDeep,
+	resolveVarPath,
+} from '../../src/scenario/interpolate.js';
 
 describe('interpolate', () => {
 	it('替换 ${var:NAME} 引用', () => {
@@ -72,5 +77,26 @@ describe('interpolate ${today:N}', () => {
 		expect(interpolate('${var:BASE}/api?d=${today:0}', { BASE: 'http://datasrc-api' })).toBe(
 			`http://datasrc-api/api?d=${expected(0)}`,
 		);
+	});
+});
+
+describe('resolveVarPath 点路径', () => {
+	const vars = { claim: { data: { tasks: [1, 2] }, code: 0 }, n: 5 };
+
+	it('点路径逐层取值', () => {
+		expect(resolveVarPath('claim.code', vars)).toBe(0);
+		expect(resolveVarPath('n', vars)).toBe(5);
+	});
+
+	it('${var:ITEM.field} 插值到字符串', () => {
+		expect(interpolate('/x/${var:claim.code}', vars)).toBe('/x/0');
+	});
+
+	it('缺字段抛 InterpolationError', () => {
+		expect(() => resolveVarPath('claim.nope', vars)).toThrow(InterpolationError);
+	});
+
+	it('标量中途下钻报错', () => {
+		expect(() => resolveVarPath('n.x', vars)).toThrow(InterpolationError);
 	});
 });
