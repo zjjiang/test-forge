@@ -1,0 +1,363 @@
+# 场景十：价格维护 · ③ 算价——比价弹窗采集 + 编辑覆盖 + 确认（2026-11-09 定义）
+# 页面：/maintain/calc（③ 算价队列页：采集酒店比价弹窗 + 队列表）
+# 数据纪律：复用固定夹具店 E2E-批量-1105-160745（shop_id=125，密码 123456）；
+#           酒店**常驻不删**（2026-11-08 用户拍板每一步独立使用酒店）；
+#           收尾不推送（④ 推送会真改信科价格，场景止步于「待推送」）
+# 2026-11-09 用户拍板（比价重做）：
+#           ① 比价弹窗照老平台逻辑：同 key（房型+早餐）取最低携程价、
+#              逐行比例可编辑、逐来源汇总取最大、确认入队一个按钮
+#           ② 行操作只留 明细/编辑/确认——编辑=重开弹窗重采集（打开即算），
+#              同键重新采集**覆盖旧行**（状态回待确认），不再 409、不作废
+# 链路：基线登录 → 前置店内有货（scope 3 家常驻）→ 前置爬虫库绑定
+#       → 前置投喂对标价（②页发起 vendor 任务 + 模拟供应商 claim+submit，
+#         datasrc 库落当日房型价——③ 对标侧数据来源）
+#       → 比价弹窗采集（安庆舍居民宿：打开→开始采集→对比表+最终比例→确认入队）
+#       → 编辑覆盖验证（行上编辑 → 弹窗自动重采集 → 确认入队 → 仍待确认）
+#       → 确认推送（行上确认 → 状态待推送——不触发真实推送）
+#       → 数据库验证（calc_queue 同键恰 1 行、status=3、三比例非空、
+#         link_event step=calc 留痕）→ 收尾保留酒店（不删）
+name: 算价比价确认
+module: 价格维护
+description: 对应用户场景 10；价格维护③算价——比价弹窗照老平台口径采集入队，编辑=重采集覆盖旧行（2026-11-09 拍板：不作废，新的覆盖旧的），确认后止步待推送（不真推信科），db 步骤验证 calc_queue 覆盖语义与事件留痕
+version: 1
+trace: false
+requires:
+  env: [RATEMAP_ASSETS, HTINNS_DB, DATASRC_URL, DATASRC_VENDOR_KEY]
+variables:
+  shopUser: "e2ebat_20261105160745"
+  hotel: "北京瑞麟湾温泉度假酒店"
+actors:
+  shop:
+    description: 夹具店铺身份（E2E-批量-1105-160745）
+    dialogs: accept
+steps:
+  - id: 店侧基线登录
+    type: flow
+    expect: 夹具店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 前置店内有货
+    type: flow
+    expect: 夹具店已有可算价酒店（scope 3 家常驻；没货先跑场景 8/04）
+    steps:
+      - id: 打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 店内含3家scope酒店
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海州湾voco酒店"); })()'
+        truthy: true
+        expect: 店内已有 scope 3 家（常驻）
+  - id: 前置爬虫库绑定
+    type: flow
+    expect: 3 家各 POST datasrc hotel_mapping（upsert 幂等）——③ 对标侧携程按名读价走该映射
+    steps:
+      - id: 绑定_安庆舍居民宿
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_mapping
+        json:
+          xk_hotel_name: 安庆舍居民宿
+          supplier_hotel_id: "20522035"
+          supplier_hotel_name: 安庆舍居民宿
+        expectStatus: 200
+        expectJson:
+          code: 0
+      - id: 绑定_北京瑞麟湾
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_mapping
+        json:
+          xk_hotel_name: 北京瑞麟湾温泉度假酒店
+          supplier_hotel_id: "50101524"
+          supplier_hotel_name: 北京瑞麟湾温泉度假酒店
+        expectStatus: 200
+        expectJson:
+          code: 0
+      - id: 绑定_连云港海州湾
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_mapping
+        json:
+          xk_hotel_name: 连云港海州湾voco酒店
+          supplier_hotel_id: "20237238"
+          supplier_hotel_name: 连云港海州湾voco酒店
+        expectStatus: 200
+        expectJson:
+          code: 0
+  - id: 前置投喂对标价
+    type: flow
+    expect: ②页发起 vendor 任务（jasper）+ 模拟供应商 claim+submit——datasrc 库落当日房型价，③ 比价弹窗的对标侧数据来源（与场景 09 同链路，复用其沉淀）
+    steps:
+      - id: 打开抓价执行页
+        as: shop
+        type: navigate
+        url: /maintain/crawl
+      - id: 等结果表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击批量上传
+        as: shop
+        type: click
+        selector: '#btn-launch'
+        waitFor: '#launchdlg[open]'
+        expect: 打开发起任务弹窗
+      - id: 上传抓价Excel
+        as: shop
+        type: upload
+        selector: '#launchdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/crawl-hotels.xlsx
+        expect: 选择抓价范围 Excel（3 行）
+      - id: 选择抓取供应商
+        as: shop
+        type: select
+        selector: '#launchdlg select[name="vendor_name"]'
+        label: 携程供应商jasper
+        expect: 发起时选供应商（测试默认 jasper）
+      - id: 提交发起
+        as: shop
+        type: click
+        selector: '#launchdlg button[type="submit"]'
+      - id: flash任务已创建
+        as: shop
+        type: js_assert
+        script: '(() => { const f = document.querySelector(".content .flash"); return !!f && f.textContent.includes("任务 #") && f.textContent.includes("已创建") && f.textContent.includes("共 3 行") && !f.textContent.includes("未匹配"); })()'
+        truthy: true
+        expect: flash「任务 #N 已创建（共 3 行…）」且无未匹配（同页检查，reload 清 flash）
+      - id: 等待派发完成
+        as: shop
+        type: wait
+        ms: 3000
+        expect: app 后台线程毫秒级 batch-create 完 6 个 vendor 任务（3 家 × ctrip/elong）
+      - id: 供应商认领任务
+        as: shop
+        type: http
+        method: GET
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/vendor/tasks?batch_size=50
+        headers:
+          X-Api-Key: ${var:DATASRC_VENDOR_KEY}
+        captureInto: claimed
+        expectStatus: 200
+        expectJson:
+          code: 0
+        expect: 认领 jasper 名下全部 pending 任务
+  - id: 供应商逐任务提交房型价
+    type: foreach
+    in: ${var:claimed.data.tasks}
+    item: task
+    expect: 每个认领到的任务提交一房一价（submit 同步落 datasrc 库——③ 对标侧数据就绪）
+    steps:
+      - id: 提交房型价
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/vendor/tasks/${var:task.task_id}/submit
+        headers:
+          X-Api-Key: ${var:DATASRC_VENDOR_KEY}
+        json:
+          rooms:
+            - room_name: 标准房双床房
+              price: 999
+              meal: 双早
+            - room_name: 家庭房
+              price: 899
+              meal: 双早
+        expectStatus: 200
+        expectJson:
+          code: 0
+        expect: 提交 ${var:task.hotel_name} 的房型价
+  - id: 比价弹窗采集入队
+    type: flow
+    expect: ③页采集酒店弹窗：输名称→开始采集→对比表渲染（信科房型×对标价逐行比例+最终比例）→确认入队（2026-11-09 拍板的简化交互）
+    steps:
+      - id: 打开算价队列页
+        as: shop
+        type: navigate
+        url: /maintain/calc
+      - id: 等队列表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点采集酒店
+        as: shop
+        type: click
+        selector: '#btn-collect'
+        waitFor: '#collectdlg[open]'
+        expect: 打开比价弹窗（名称/入住离店日期已默认今天/明天）
+      - id: 填写瑞麟湾名称
+        as: shop
+        type: fill
+        selector: '#collectForm input[name="xk_hotel_name"]'
+        value: ${var:hotel}
+      - id: 开始采集
+        as: shop
+        type: click
+        selector: '#btn-collect-go'
+        expect: 实时采集信科+对标两侧房型明细并算比例（信科走真实接口，数秒级）
+      - id: 对比表渲染且比例算出
+        as: shop
+        type: js_assert
+        timeoutMs: 180000
+        script: '(() => { const tbl = document.querySelector("#panel-ctrip table.tbl"); if (!tbl) return false; const fr = parseFloat(document.getElementById("finalRate").value); return !isNaN(fr); })()'
+        truthy: true
+        expect: 携程对比表已渲染且最终比例非空（同 key 取最低携程价、跨 key 取最大比例——老平台口径）
+      - id: 确认入队
+        as: shop
+        type: click
+        selector: '#btn-enqueue'
+        expect: 入队（同键已有行会被覆盖，此处首采新增）
+      - id: 队列出现待确认行
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); return rows.some((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("待确认")); })()'
+        truthy: true
+        expect: 队列表出现 安庆舍居民宿 的待确认行
+  - id: 编辑覆盖验证
+    type: flow
+    expect: 行上「编辑」=重开比价弹窗（打开即自动重采集）→确认入队→同键覆盖旧行仍待确认（2026-11-09 拍板：不作废，新的覆盖旧的）
+    steps:
+      - id: 点行上编辑
+        as: shop
+        type: click
+        selector: '.btn-edit[data-name="北京瑞麟湾温泉度假酒店"]'
+        waitFor: '#collectdlg[open]'
+        expect: 编辑=采集按钮：弹窗打开即自动开始重采集
+      - id: 重采集完成
+        as: shop
+        type: js_assert
+        timeoutMs: 180000
+        script: '(() => { const tbl = document.querySelector("#panel-ctrip table.tbl"); if (!tbl) return false; const fr = parseFloat(document.getElementById("finalRate").value); return !isNaN(fr); })()'
+        truthy: true
+        expect: 重采集对比表再次渲染且比例算出
+      - id: 确认覆盖入队
+        as: shop
+        type: click
+        selector: '#btn-enqueue'
+        expect: 覆盖同键旧行（不新增、不 409）
+      - id: 覆盖后仍待确认
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); return rows.some((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("待确认")); })()'
+        truthy: true
+        expect: 覆盖后该行回到待确认（无报错、无新行）
+  - id: 确认进待推送
+    type: flow
+    expect: 行上「确认」→ 状态待推送（场景止步于此——④ 推送会真改信科价格，不触发）
+    steps:
+      - id: 点行上确认
+        as: shop
+        type: click
+        selector: '.btn-review[data-name="北京瑞麟湾温泉度假酒店"]'
+        waitFor: '#reviewdlg[open]'
+        expect: 二次确认弹层
+      - id: 确定确认
+        as: shop
+        type: click
+        selector: '#review-go'
+        expect: 状态置为待推送（纯置位，不触发推送）
+      - id: 行变待推送
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); return rows.some((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("待推送")); })()'
+        truthy: true
+        expect: 队列表该行状态变为待推送
+  - id: 数据库验证比价闭环
+    type: flow
+    expect: TestForge db 步骤直查 htinns 库：calc_queue 同键覆盖语义、确认态与比例、link_event 留痕
+    steps:
+      - id: DB_同键恰一行
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n FROM calc_queue WHERE shop_id=125 AND xk_hotel_name=''北京瑞麟湾温泉度假酒店'' AND check_in_date=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "1"
+        expect: 同店同酒店同入住恰 1 行——重采集覆盖旧行（2026-11-09 拍板）的直接证据
+      - id: DB_确认态带比例
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT status, final_rate, ctrip_rate, fliggy_rate FROM calc_queue WHERE shop_id=125 AND xk_hotel_name=''北京瑞麟湾温泉度假酒店'' AND check_in_date=CURDATE() ORDER BY id DESC LIMIT 1'
+        minRows: 1
+        asserts:
+          - column: status
+            equals: "3"
+          - column: final_rate
+            gte: "1"
+          - column: ctrip_rate
+            gte: "1"
+        expect: 该行 status=3（待推送）且最终/携程比例非空（飞猪比例允许为空——匹配链未命中不算失败）
+      - id: DB_入队事件留痕
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(DISTINCT e.source) AS sources, COUNT(*) AS total FROM link_event e WHERE e.shop_id=125 AND e.step=''calc'' AND e.biz_date=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: sources
+            gte: "1"
+          - column: total
+            gte: "2"
+        expect: link_event 今日 shop 125 step=calc 留痕 ≥2 条（弹窗采集入队每来源一条；重跑当日累积故 total 用 gte）
+teardown:
+  - id: 收尾保留酒店
+    type: flow
+    expect: 夹具店酒店常驻：不删除；calc_queue 行与 link_event 为夹具店预期残留（留档，重跑覆盖不累积），**不触发推送**
+    steps:
+      - id: 收尾打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 收尾等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾确认3家仍在店
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("北京瑞麟湾温泉度假酒店") && t.includes("连云港海州湾voco酒店"); })()'
+        truthy: true
+        expect: scope 3 家仍常驻店内
