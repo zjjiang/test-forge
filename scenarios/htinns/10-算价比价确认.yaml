@@ -193,12 +193,18 @@ steps:
           rooms:
             - room_name: 标准房双床房
               price: 999
+
+              display_price: "999"
               meal: 双早
             - room_name: 标准房双床房
               price: 1200
+
+              display_price: "1200"
               meal: 双早
             - room_name: 家庭房
               price: 899
+
+              display_price: "899"
               meal: 双早
         expectStatus: 200
         expectJson:
@@ -285,7 +291,7 @@ steps:
       - id: 点行上编辑
         as: shop
         type: click
-        selector: '.btn-edit[data-name="北京瑞麟湾温泉度假酒店"]'
+        selector: '.btn-edit[data-name="北京瑞麟湾温泉度假酒店"][data-in="${today:0}"]'
         waitFor: '#collectdlg[open]'
         expect: 编辑=采集按钮：弹窗打开即自动开始重采集
       - id: 重采集完成
@@ -319,7 +325,7 @@ steps:
       - id: 点行上确认
         as: shop
         type: click
-        selector: '.btn-review[data-name="北京瑞麟湾温泉度假酒店"]'
+        selector: '.btn-review[data-name="北京瑞麟湾温泉度假酒店"][data-in="${today:0}"]'
         waitFor: '#reviewdlg[open]'
         expect: 二次确认弹层
       - id: 确定确认

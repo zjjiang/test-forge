@@ -219,6 +219,8 @@ steps:
           rooms:
             - room_name: 标准大床房
               price: 288
+
+              display_price: "288"
         expectStatus: 200
         expectJson:
           code: 0
