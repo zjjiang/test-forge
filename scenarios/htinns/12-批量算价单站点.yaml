@@ -1,5 +1,5 @@
-# 场景十二：价格维护 · ③ 算价——Excel 批量入队单站点（2026-11-09 定义）
-# 页面：/maintain/calc（③ 算价队列页「Excel 批量入队」弹窗）
+# 场景十二：价格维护 · ③ 算价——批量比价（Excel 批量入队）单站点（2026-11-09 定义）
+# 页面：/maintain/calc（③ 算价队列页「批量比价」弹窗）
 # 数据纪律：复用夹具店 shop 125 常驻真实酒店；对标价由 ② 链路 vendor 投喂
 #           （与场景 10 同款）；「不存在酒店」只验不落队列；失败行覆盖语义不累积
 # 拍板口径（2026-11-09）：
@@ -15,7 +15,7 @@
 #       → 收尾保留酒店（当日数据留档，场景重跑覆盖自愈）
 name: 批量算价单站点
 module: 价格维护
-description: 对应用户场景 12；③算价 Excel 批量入队单站点——跟随比价站点下拉（默认携程），算出的入队待确认、没算出的（信科侧失败）直接已失败带原因、未匹配行不落队列，db 验证 batch 行与失败原因
+description: 对应用户场景 12；③算价 批量比价单站点——跟随比价站点下拉（默认携程），算出的入队待确认、没算出的（信科侧失败）直接已失败带原因、未匹配行不落队列，db 验证 batch 行与失败原因
 version: 1
 trace: false
 requires:
@@ -165,7 +165,7 @@ steps:
         expect: 提交 ${var:task.hotel_name} 的房型价
   - id: 批量上传_成功与未匹配
     type: flow
-    expect: ③页「Excel 批量入队」上传[瑞麟湾+不存在酒店]（站点跟随页面下拉=携程）→ 瑞麟湾入队待确认携程比例非空；不存在酒店只落任务 CSV 不落队列
+    expect: ③页「批量比价」上传[瑞麟湾+不存在酒店]（站点跟随页面下拉=携程）→ 瑞麟湾入队待确认携程比例非空；不存在酒店只落任务 CSV 不落队列
     steps:
       - id: 打开算价队列页
         as: shop
@@ -181,7 +181,7 @@ steps:
         script: '(() => { const s = document.getElementById("collect-source"); return !!s && s.value === "ctrip" && s.options[s.selectedIndex].textContent === "携程"; })()'
         truthy: true
         expect: 页面「比价站点」下拉默认携程（批量跟随它）
-      - id: 点Excel批量入队
+      - id: 点批量比价
         as: shop
         type: click
         selector: '#btn-batch'
@@ -250,7 +250,7 @@ steps:
     type: flow
     expect: 上传[安庆舍居民宿]（信科 0 房型）→ 行直接「已失败」带「信科侧失败」原因——不再留全空比例假「采集中」行
     steps:
-      - id: 点Excel批量入队
+      - id: 点批量比价
         as: shop
         type: click
         selector: '#btn-batch'
