@@ -1,0 +1,366 @@
+# 场景十一：价格维护 · ③ 算价——失败场景枚举（2026-11-09 定义）
+# 页面：/maintain/calc（③ 算价队列页：采集失败直接失败——错误记在留痕行，
+#       前端关弹窗刷新列表，错误红字显示在行上；2026-11-09 拍板交互）
+# 数据纪律：复用夹具店 shop 125 常驻真实酒店，失败案例全部来自真实数据；
+#           「查无此店」用例只向信科发起查询（不落任何酒店数据），
+#           calc_queue 失败行按覆盖语义不累积，留档说明代替清理
+# 失败枚举（5 类，用户 2026-11-09 要求逐个看失败流程）：
+#   ① 信科页面无产品   → 安庆舍居民宿（页面 0 房型，真实）
+#      行上错误 = 解析后无有效底价
+#   ② 标签过滤滤光     → 新元素电竞民宿(高新创智广场店)（有产品但非
+#      「直签+供应商开票」组合，真实）→ 行上错误 = 标签过滤后无剩余房型
+#   ③ 信科搜不到酒店   → 不存在的名称（仅查询，立即失败）
+#      行上错误 = 未找到酒店: xxx
+#   ④ 对标日期无数据   → 采集瑞麟湾但入住=明天（爬虫库只投喂了今天）
+#      行上错误 = 比例未算出：携程未找到对标价；飞猪未找到对标价
+#   ⑤ 房型名不匹配     → vendor 投喂错名房型后采集瑞麟湾（今天）
+#      行上错误 = 比例未算出：携程无匹配房型；飞猪未找到对标价
+#       （⑤ 会把当日瑞麟湾爬虫数据污染成错名房型——场景 10 重跑自愈）
+# 链路：基线登录 → 店内在货检查 → 失败①②③④（逐个采集→弹窗关→行上错误）
+#       → 失败⑤前置投喂错名房型（②链路）→ 失败⑤采集验证 → DB 验证
+#       （当日失败行恰 5 条且错误非空）→ 收尾保留酒店
+name: 算价失败场景
+module: 价格维护
+description: 对应用户场景 11；③算价采集失败枚举——无产品/标签滤光/查无此店/对标日期无数据/房型名不匹配 5 类失败，逐个采集验证「失败直接失败」：错误记在留痕行、弹窗关闭、列表红字可见，db 验证当日失败行恰 5 条
+version: 1
+trace: false
+requires:
+  env: [RATEMAP_ASSETS, HTINNS_DB, DATASRC_URL, DATASRC_VENDOR_KEY]
+variables:
+  shopUser: "e2ebat_20261105160745"
+  badHotel: "查无此店比价测试"
+actors:
+  shop:
+    description: 夹具店铺身份（E2E-批量-1105-160745）
+    dialogs: accept
+steps:
+  - id: 店侧基线登录
+    type: flow
+    expect: 夹具店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 店内在货检查
+    type: flow
+    expect: 失败案例涉及的酒店常驻店内（安庆舍居民宿/新元素电竞民宿/北京瑞麟湾，由场景 04/08 导入后常驻）
+    steps:
+      - id: 打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 失败案例酒店在店
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("新元素电竞民宿") && t.includes("北京瑞麟湾温泉度假酒店"); })()'
+        truthy: true
+        expect: 三个失败案例酒店都在店内
+  - id: 失败1_信科页面无产品
+    type: flow
+    expect: 采集 安庆舍居民宿（页面 0 房型）→ 留痕行直接失败：弹窗关、行上红字「解析后无有效底价」
+    steps:
+      - id: 打开算价队列页
+        as: shop
+        type: navigate
+        url: /maintain/calc
+      - id: 等队列表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点采集酒店
+        as: shop
+        type: click
+        selector: '#btn-collect'
+        waitFor: '#collectdlg[open]'
+        expect: 打开采集弹窗（先留痕再采集）
+      - id: 填写安庆舍居民宿
+        as: shop
+        type: fill
+        selector: '#collectForm input[name="xk_hotel_name"]'
+        value: 安庆舍居民宿
+      - id: 开始采集
+        as: shop
+        type: click
+        selector: '#btn-collect-go'
+        expect: 留痕行已建，同步采集在信科侧失败
+      - id: 行上出现无产品错误
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 180000
+        script: '(() => { const dlg = document.getElementById("collectdlg"); if (dlg.open) return false; const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("安庆舍居民宿")); return !!tr && tr.textContent.includes("解析后无有效底价"); })()'
+        truthy: true
+        expect: 弹窗已关，安庆舍居民宿行红字「解析后无有效底价」（环节截图=失败行）
+  - id: 失败2_标签过滤滤光
+    type: flow
+    expect: 采集 新元素电竞民宿（有产品但标签过滤后无剩余房型）→ 行上红字「标签过滤后无剩余房型」
+    steps:
+      - id: 点采集酒店
+        as: shop
+        type: click
+        selector: '#btn-collect'
+        waitFor: '#collectdlg[open]'
+      - id: 填写新元素电竞民宿
+        as: shop
+        type: fill
+        selector: '#collectForm input[name="xk_hotel_name"]'
+        value: 新元素电竞民宿(高新创智广场店)
+      - id: 开始采集
+        as: shop
+        type: click
+        selector: '#btn-collect-go'
+      - id: 行上出现标签过滤错误
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 180000
+        script: '(() => { const dlg = document.getElementById("collectdlg"); if (dlg.open) return false; const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("新元素电竞民宿")); return !!tr && tr.textContent.includes("标签过滤后无剩余房型"); })()'
+        truthy: true
+        expect: 新元素电竞民宿行红字「标签过滤后无剩余房型」（有产品但被直签+供应商开票口径滤光）
+  - id: 失败3_信科搜不到酒店
+    type: flow
+    expect: 采集不存在的名称 → 信科立即返回未找到 → 行上红字「未找到酒店」（仅查询，不落酒店数据）
+    steps:
+      - id: 点采集酒店
+        as: shop
+        type: click
+        selector: '#btn-collect'
+        waitFor: '#collectdlg[open]'
+      - id: 填写不存在的名称
+        as: shop
+        type: fill
+        selector: '#collectForm input[name="xk_hotel_name"]'
+        value: ${var:badHotel}
+      - id: 开始采集
+        as: shop
+        type: click
+        selector: '#btn-collect-go'
+      - id: 行上出现未找到酒店错误
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 180000
+        script: '(() => { const dlg = document.getElementById("collectdlg"); if (dlg.open) return false; const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("查无此店比价测试")); return !!tr && tr.textContent.includes("未找到酒店"); })()'
+        truthy: true
+        expect: 查无此店行红字「未找到酒店…」（信科侧立即失败）
+  - id: 失败4_对标日期无数据
+    type: flow
+    expect: 采集瑞麟湾但入住=明天/离店=后天（爬虫库只投喂了今天）→ 对标两侧都未命中 → 行上红字「比例未算出：携程未找到对标价；飞猪未找到对标价」
+    steps:
+      - id: 点采集酒店
+        as: shop
+        type: click
+        selector: '#btn-collect'
+        waitFor: '#collectdlg[open]'
+      - id: 填写瑞麟湾名称
+        as: shop
+        type: fill
+        selector: '#collectForm input[name="xk_hotel_name"]'
+        value: 北京瑞麟湾温泉度假酒店
+      - id: 入住改明天
+        as: shop
+        type: fill
+        selector: '#collectForm input[name="check_in_date"]'
+        value: ${today:1}
+        expect: 入住=明天（${today:1}）——爬虫库无该日数据
+      - id: 离店改后天
+        as: shop
+        type: fill
+        selector: '#collectForm input[name="check_out_date"]'
+        value: ${today:2}
+      - id: 开始采集
+        as: shop
+        type: click
+        selector: '#btn-collect-go'
+      - id: 行上出现对标未命中错误
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 180000
+        script: '(() => { const dlg = document.getElementById("collectdlg"); if (dlg.open) return false; const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店")); return !!tr && tr.textContent.includes("比例未算出") && tr.textContent.includes("未找到对标价"); })()'
+        truthy: true
+        expect: 瑞麟湾(明天)行红字「比例未算出：…未找到对标价」（两来源比例全空=直接失败，2026-11-09 拍板）
+  - id: 失败5_房型名不匹配
+    type: flow
+    expect: vendor 投喂错名房型（污染当日瑞麟湾对标数据）→ 采集瑞麟湾今天 → 携程有数据但全对不上 → 行上红字「比例未算出：携程无匹配房型」
+    steps:
+      - id: 打开抓价执行页
+        as: shop
+        type: navigate
+        url: /maintain/crawl
+      - id: 等结果表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击批量上传
+        as: shop
+        type: click
+        selector: '#btn-launch'
+        waitFor: '#launchdlg[open]'
+      - id: 上传抓价Excel
+        as: shop
+        type: upload
+        selector: '#launchdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/crawl-hotels.xlsx
+      - id: 选择抓取供应商
+        as: shop
+        type: select
+        selector: '#launchdlg select[name="vendor_name"]'
+        label: 携程供应商jasper
+      - id: 提交发起
+        as: shop
+        type: click
+        selector: '#launchdlg button[type="submit"]'
+      - id: 等待派发完成
+        as: shop
+        type: wait
+        ms: 3000
+      - id: 供应商认领任务
+        as: shop
+        type: http
+        method: GET
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/vendor/tasks?batch_size=50
+        headers:
+          X-Api-Key: ${var:DATASRC_VENDOR_KEY}
+        captureInto: claimed
+        expectStatus: 200
+        expectJson:
+          code: 0
+  - id: 供应商提交错名房型
+    type: foreach
+    in: ${var:claimed.data.tasks}
+    item: task
+    expect: 每个任务提交一个信科侧不存在的房型名（污染当日对标数据——场景 10 重跑自愈）
+    steps:
+      - id: 提交错名房型价
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/vendor/tasks/${var:task.task_id}/submit
+        headers:
+          X-Api-Key: ${var:DATASRC_VENDOR_KEY}
+        json:
+          rooms:
+            - room_name: 比价失败专用房型XYZ
+              price: 500
+              meal: 双早
+        expectStatus: 200
+        expectJson:
+          code: 0
+        expect: 提交 ${var:task.hotel_name} 的错名房型（同步落 datasrc 库）
+  - id: 失败5_采集验证
+    type: flow
+    expect: 采集瑞麟湾（今天）→ 携程有数据但房型名全对不上 → 行上红字「比例未算出：携程无匹配房型」
+    steps:
+      - id: 回到算价队列页
+        as: shop
+        type: navigate
+        url: /maintain/calc
+      - id: 等队列表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点采集酒店
+        as: shop
+        type: click
+        selector: '#btn-collect'
+        waitFor: '#collectdlg[open]'
+      - id: 填写瑞麟湾名称
+        as: shop
+        type: fill
+        selector: '#collectForm input[name="xk_hotel_name"]'
+        value: 北京瑞麟湾温泉度假酒店
+      - id: 开始采集
+        as: shop
+        type: click
+        selector: '#btn-collect-go'
+      - id: 行上出现无匹配房型错误
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 180000
+        script: '(() => { const dlg = document.getElementById("collectdlg"); if (dlg.open) return false; return Array.from(document.querySelectorAll(".tbl tbody tr")).some((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("无匹配房型")); })()'
+        truthy: true
+        expect: 瑞麟湾(今天)行红字「比例未算出：携程无匹配房型…」（found 但全对不上）
+  - id: 数据库验证失败枚举
+    type: flow
+    expect: db 直查：当日 shop 125 失败行恰 5 条（覆盖语义不累积）且错误非空、涉及全部 5 类酒店
+    steps:
+      - id: 等待落库可见
+        as: shop
+        type: wait
+        ms: 3000
+      - id: DB_失败行恰5条
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n FROM calc_queue WHERE shop_id=125 AND check_in_date>=CURDATE() AND error_msg IS NOT NULL AND error_msg != '''''
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "5"
+        expect: 安庆/新元素/查无此店/瑞麟湾(明天)/瑞麟湾(今天) 各 1 行，重跑覆盖不累积
+      - id: DB_5类失败原因齐全
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COALESCE(SUM(error_msg LIKE ''%解析后无有效底价%''),0) AS no_product, COALESCE(SUM(error_msg LIKE ''%标签过滤后无剩余房型%''),0) AS tag_filtered, COALESCE(SUM(error_msg LIKE ''%未找到酒店%''),0) AS not_found, COALESCE(SUM(error_msg LIKE ''%未找到对标价%''),0) AS no_ref, COALESCE(SUM(error_msg LIKE ''%无匹配房型%''),0) AS no_match FROM calc_queue WHERE shop_id=125 AND check_in_date>=CURDATE() AND error_msg IS NOT NULL AND error_msg != '''''
+        minRows: 1
+        asserts:
+          - column: no_product
+            gte: "1"
+          - column: tag_filtered
+            gte: "1"
+          - column: not_found
+            gte: "1"
+          - column: no_ref
+            gte: "1"
+          - column: no_match
+            gte: "1"
+        expect: 5 类失败原因各至少 1 行（解析后无有效底价/标签过滤后无剩余房型/未找到酒店/未找到对标价/无匹配房型）——用户要求枚举的直接证据
+teardown:
+  - id: 收尾保留酒店
+    type: flow
+    expect: 夹具店酒店常驻不删；calc_queue 失败行留档（覆盖语义不累积）；瑞麟湾当日爬虫数据被错名投喂污染——场景 10 重跑自愈
+    steps:
+      - id: 收尾打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 收尾等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾确认案例酒店仍在店
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 30000
+        script: '(() => { const t = document.body.textContent; return t.includes("安庆舍居民宿") && t.includes("新元素电竞民宿") && t.includes("北京瑞麟湾温泉度假酒店"); })()'
+        truthy: true
+        expect: 失败案例酒店仍常驻店内
