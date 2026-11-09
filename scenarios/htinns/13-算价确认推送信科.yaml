@@ -1,0 +1,347 @@
+# 场景十三：价格维护 · ④ 推送——确认行真推信科分组（2026-11-09 定义）
+# 页面：/maintain/push（④ 推送页，行级「推送」按钮）
+# 数据纪律：推送目标是夹具店真实酒店（爱哆=API 可达 + fliggy_shid 78603003；
+#           瑞麟湾=fliggy_shid 空→守卫失败），信科出口为真实测试环境调用；
+#           分组 4816 取自老平台 shop 7（新乡旅途，同信科店 499）历史成功日志
+# 前置考证（2026-11-09）：
+#   ① 夹具店推送方式=api，凭证继承老平台 shop 7（新乡旅途，xk_shop_id 同为
+#      499）——appId 162 签名认证实测有效，历史 update_hotel_group 全 success
+#   ② API shids 认 fliggy_shid（78xxx 命名空间）；爱哆在 499 平台列表且
+#      hotel_config.fliggy_shid=78603003 非空（守卫满足）
+#   ③ 待推送行以 source='e2e-push' 预置（平台上平台酒店均无直签底价，
+#      ③ 真实算价无法为它们产出行——唯一预置状态，其余全真）
+#   ④ 成功回读实证：推送后信科 platformHotel/hotellist 爱哆行
+#      hotel_group_id=4816（开发时已验证）
+# 链路：基线登录 → 继承信科 API 凭证（db 拷贝 shop 7→125）→ 配置页导入
+#       标签 80→4816 → 预置爱哆/瑞麟湾两行待推送 → ④ 页推爱哆行
+#       → 已成功+分组4816+事件留痕 → 推瑞麟湾行 → 守卫失败带原因
+#       → 重复推送 409 → 收尾清空标签
+name: 算价确认推送信科
+module: 价格维护
+description: 对应用户场景 13；④推送真推信科分组——凭证继承老平台新乡旅途（同信科店 499），爱哆行推送成功回填分组 4816 + link_event/wf_step_log 留痕，瑞麟湾行守卫失败（fliggy_shid 空）带原因，重复推送 409，收尾清空标签
+version: 1
+trace: false
+requires:
+  env: [HTINNS_DB, RATEMAP_ASSETS]
+variables:
+  shopUser: "e2ebat_20261105160745"
+actors:
+  shop:
+    description: 夹具店铺身份（E2E-批量-1105-160745）
+    dialogs: accept
+steps:
+  - id: 店侧基线登录
+    type: flow
+    expect: 夹具店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 前置_信科API凭证继承
+    type: flow
+    expect: 夹具店凭证继承老平台 shop 7（新乡旅途，同信科店 499）——appId 162 签名认证已实测有效；凭证值不落场景文件（SQL 店间拷贝）
+    steps:
+      - id: DB_凭证从shop7拷到125
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'UPDATE hotel_common.shop t JOIN hotel_common.shop s ON s.id=7 SET t.xk_app_id=s.xk_app_id, t.xk_secret=s.xk_secret, t.xk_shop_id=s.xk_shop_id, t.xinke_push_method=''api'' WHERE t.id=125'
+        expect: UPDATE 幂等拷贝凭证（不含任何明文密钥）
+      - id: DB_凭证就位断言
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT (xk_app_id IS NOT NULL AND xk_app_id<>'''') AS has_app, (LENGTH(xk_secret)>0) AS has_secret, (xinke_push_method=''api'') AS is_api, (xk_shop_id=''499'') AS shop_ok FROM hotel_common.shop WHERE id=125'
+        minRows: 1
+        asserts:
+          - column: has_app
+            equals: "1"
+          - column: has_secret
+            equals: "1"
+          - column: is_api
+            equals: "1"
+          - column: shop_ok
+            equals: "1"
+        expect: shop 125 具备 API 推送前提（app_id/secret/api 方式/信科店 499）
+  - id: 前置_导入标签80至4816
+    type: flow
+    expect: 配置页导入 rate 80→tag_id 4816（老平台 shop 7 历史成功分组；整店替换语义）——final_rate 88.5 向下取整命中 80 档
+    steps:
+      - id: 打开配置页
+        as: shop
+        type: navigate
+        url: /maintain/config
+      - id: 等标签表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击批量添加
+        as: shop
+        type: click
+        selector: '#btn-batch'
+        waitFor: '#importdlg[open]'
+      - id: 上传标签Excel
+        as: shop
+        type: upload
+        selector: '#importdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/push-rate-tags.xlsx
+        expect: 名单[rate 80 → tag_id 4816]
+      - id: 提交导入
+        as: shop
+        type: click
+        selector: '#importdlg button[type="submit"]'
+      - id: flash导入完成1行
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("导入完成") && t.includes("1 行"); })()'
+        truthy: true
+        expect: flash 提示导入完成且行数为 1
+      - id: DB_标签映射就位
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n, COALESCE(SUM(tag_id=''4816''),0) AS g FROM hotel_db_v2.xk_rate_config WHERE shop_id=''125'' AND is_active=1'
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "1"
+          - column: g
+            equals: "1"
+        expect: 夹具店标签映射恰 1 行且指向 4816
+  - id: 前置_预置两行待推送
+    type: flow
+    expect: 预置爱哆（推送成功案例）/瑞麟湾（守卫失败案例）两行 status=3（source='e2e-push'；重跑先重置再补插，幂等单行）
+    steps:
+      - id: DB_重置爱哆旧行
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'UPDATE calc_queue SET status=3, final_rate=88.5, ctrip_rate=88.5, error_msg=NULL, group_id=NULL, push_time=NULL WHERE shop_id=125 AND source=''e2e-push'' AND xk_hotel_name=''爱哆酒店(上海站店)'' AND check_in_date>=CURDATE()'
+        expect: 当日 e2e 行重置回待推送（重跑幂等）
+      - id: DB_补插爱哆行
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'INSERT INTO calc_queue (shop_id, xk_hotel_name, check_in_date, check_out_date, xk_rooms, ctrip_rate, final_rate, status, source) SELECT 125,''爱哆酒店(上海站店)'',CURDATE(),DATE_ADD(CURDATE(), INTERVAL 1 DAY),''[]'',88.5,88.5,3,''e2e-push'' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM calc_queue WHERE shop_id=125 AND source=''e2e-push'' AND xk_hotel_name=''爱哆酒店(上海站店)'' AND check_in_date>=CURDATE())'
+        expect: 无当日行才补插（已有则跳过）
+      - id: DB_重置瑞麟湾旧行
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'UPDATE calc_queue SET status=3, final_rate=76, ctrip_rate=76, error_msg=NULL, group_id=NULL, push_time=NULL WHERE shop_id=125 AND source=''e2e-push'' AND xk_hotel_name=''北京瑞麟湾温泉度假酒店'' AND check_in_date>=CURDATE()'
+        expect: 当日 e2e 行重置回待推送
+      - id: DB_补插瑞麟湾行
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'INSERT INTO calc_queue (shop_id, xk_hotel_name, check_in_date, check_out_date, xk_rooms, ctrip_rate, final_rate, status, source) SELECT 125,''北京瑞麟湾温泉度假酒店'',CURDATE(),DATE_ADD(CURDATE(), INTERVAL 1 DAY),''[]'',76,76,3,''e2e-push'' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM calc_queue WHERE shop_id=125 AND source=''e2e-push'' AND xk_hotel_name=''北京瑞麟湾温泉度假酒店'' AND check_in_date>=CURDATE())'
+        expect: 无当日行才补插
+      - id: DB_两行待推送断言
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n, COALESCE(SUM(status=3),0) AS p3 FROM calc_queue WHERE shop_id=125 AND source=''e2e-push'' AND check_in_date>=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "2"
+          - column: p3
+            equals: "2"
+        expect: 恰 2 行 e2e 行且均待推送
+  - id: 推送成功_爱哆
+    type: flow
+    expect: ④ 页爱哆行「推送」→ 同步真调信科 API（shids=78603003, group 4816）→ 已成功
+    steps:
+      - id: 打开推送页
+        as: shop
+        type: navigate
+        url: /maintain/push
+      - id: 等表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 爱哆行待推送且按钮在
+        as: shop
+        type: js_assert
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("爱哆酒店(上海站店)") && r.textContent.includes("待推送") && r.textContent.includes("88.50")); return !!tr && !!tr.querySelector("[data-push-row]"); })()'
+        truthy: true
+        expect: 爱哆行（final 88.50 锚定 e2e 行）待推送且带推送按钮
+      - id: 点击爱哆行推送
+        as: shop
+        type: js_assert
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("爱哆酒店(上海站店)") && r.textContent.includes("待推送") && r.textContent.includes("88.50")); if (!tr) return false; const b = tr.querySelector("[data-push-row]"); if (!b) return false; b.click(); return true; })()'
+        truthy: true
+        expect: 行级推送按钮点击（同步调信科后页面刷新）
+      - id: 爱哆行变已成功
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("爱哆酒店(上海站店)") && r.textContent.includes("88.50")); return !!tr && tr.textContent.includes("已成功"); })()'
+        truthy: true
+        expect: 爱哆行状态已成功（真实信科 API 推送回执；环节截图=成功行）
+  - id: DB_成功路径验证
+    type: flow
+    expect: 爱哆行 status=5 + group_id=4816 + push_time 非空 + 事件留痕（link_event high / wf_step_log ok）
+    steps:
+      - id: DB_行终态断言
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n, COALESCE(SUM(status=5),0) AS ok5, COALESCE(SUM(group_id=''4816''),0) AS g4816, COALESCE(SUM(push_time IS NOT NULL),0) AS pt, COALESCE(SUM(error_msg IS NULL),0) AS eno FROM calc_queue WHERE shop_id=125 AND source=''e2e-push'' AND xk_hotel_name=''爱哆酒店(上海站店)'' AND check_in_date>=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "1"
+          - column: ok5
+            equals: "1"
+          - column: g4816
+            equals: "1"
+          - column: pt
+            equals: "1"
+          - column: eno
+            equals: "1"
+        expect: 恰 1 行、已成功、分组 4816、推送时间非空、无错误信息（重跑重置不累积）
+      - id: DB_link_event留痕
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n FROM link_event le JOIN hotel_db_v2.hotel_config hc ON hc.id=le.hotel_id WHERE le.shop_id=125 AND le.step=''push'' AND le.source=''xinke'' AND le.confidence=''high'' AND hc.hotel_name=''爱哆酒店(上海站店)'' AND le.biz_date=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            gte: "1"
+        expect: 当日爱哆推送事件 confidence=high 至少 1 条（重跑递增用 gte）
+      - id: DB_wf_step_log留痕
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n FROM wf_step_log WHERE shop_id=125 AND step=''push'' AND status=''ok'' AND output LIKE ''%4816%'' AND created_at>=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            gte: "1"
+        expect: 当日 push ok 步骤日志含分组 4816 至少 1 条
+  - id: 推送守卫失败_瑞麟湾
+    type: flow
+    expect: 瑞麟湾行（fliggy_shid 空）推送 → 守卫直接已失败带原因（不发信科）——先记录行 id 供 409 复推用
+    steps:
+      - id: 记录瑞麟湾行id
+        as: shop
+        type: js_assert
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("待推送") && r.textContent.includes("76.00")); if (!tr) return false; const b = tr.querySelector("[data-push-row]"); if (!b) return false; localStorage.setItem("e2e_xk_qid", b.getAttribute("data-push-row")); return true; })()'
+        truthy: true
+        expect: 行 id 暂存 localStorage（页面刷新后仍可读）
+      - id: 点击瑞麟湾行推送
+        as: shop
+        type: js_assert
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("待推送") && r.textContent.includes("76.00")); if (!tr) return false; const b = tr.querySelector("[data-push-row]"); if (!b) return false; b.click(); return true; })()'
+        truthy: true
+        expect: 行级推送按钮点击（守卫在调信科前拦截）
+      - id: 瑞麟湾行变已失败
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("76.00")); return !!tr && tr.textContent.includes("已失败") && tr.textContent.includes("fliggy_shid"); })()'
+        truthy: true
+        expect: 瑞麟湾行已失败且原因含 fliggy_shid（环节截图=失败行）
+  - id: DB_失败路径验证
+    type: flow
+    expect: 瑞麟湾 e2e 行 status=6 且 error_msg 带守卫原因
+    steps:
+      - id: DB_失败行断言
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n, COALESCE(SUM(status=6),0) AS f6, COALESCE(SUM(error_msg LIKE ''%fliggy_shid%''),0) AS r, COALESCE(SUM(group_id IS NULL),0) AS ng FROM calc_queue WHERE shop_id=125 AND source=''e2e-push'' AND xk_hotel_name=''北京瑞麟湾温泉度假酒店'' AND check_in_date>=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "1"
+          - column: f6
+            equals: "1"
+          - column: r
+            equals: "1"
+          - column: ng
+            equals: "1"
+        expect: 恰 1 行、已失败、原因含 fliggy_shid、未回填分组
+  - id: 重复推送409
+    type: flow
+    expect: 对已失败的瑞麟湾行复推 → 409 该行已不是待推送状态（状态门）
+    steps:
+      - id: 复推请求返回409
+        as: shop
+        type: js_assert
+        script: '(() => { const id = localStorage.getItem("e2e_xk_qid"); if (!id) return false; const x = new XMLHttpRequest(); x.open("POST", "/maintain/push/" + id + "/run", false); x.send(); return x.status === 409; })()'
+        truthy: true
+        expect: 同步复推非待推送行 → HTTP 409（abort(409)，UI 的 d.code 由 r.json() 兜底转出）
+      - id: 清理暂存id
+        as: shop
+        type: js_assert
+        script: '(() => { localStorage.removeItem("e2e_xk_qid"); return true; })()'
+        truthy: true
+        expect: localStorage 暂存清理
+teardown:
+  - id: 收尾_清空标签
+    type: flow
+    expect: 标签整店替换为空（导入 0 行，07 同款纪律）；e2e 行留档（覆盖语义重跑重置）；凭证保留（幂等重拷）
+    steps:
+      - id: 收尾打开配置页
+        as: shop
+        type: navigate
+        url: /maintain/config
+      - id: 收尾等表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾点批量添加
+        as: shop
+        type: click
+        selector: '#btn-batch'
+        waitFor: '#importdlg[open]'
+      - id: 收尾上传空表
+        as: shop
+        type: upload
+        selector: '#importdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/push-rate-tags-empty.xlsx
+        expect: 表头齐仅 0 行数据——整店清空
+      - id: 收尾提交导入
+        as: shop
+        type: click
+        selector: '#importdlg button[type="submit"]'
+      - id: 收尾flash导入0行
+        as: shop
+        type: js_assert
+        script: '(() => { const t = (document.querySelector(".content .flash") || { textContent: "" }).textContent; return t.includes("导入完成") && t.includes("0 行"); })()'
+        truthy: true
+        expect: flash 提示导入完成且行数为 0
+      - id: 收尾DB标签清空
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n FROM hotel_db_v2.xk_rate_config WHERE shop_id=''125'''
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "0"
+        expect: 夹具店标签映射已清空
