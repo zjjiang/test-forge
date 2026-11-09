@@ -11,7 +11,9 @@
 # 链路：基线登录 → 前置店内有货（scope 3 家常驻）→ 前置爬虫库绑定
 #       → 前置投喂对标价（②页发起 vendor 任务 + 模拟供应商 claim+submit，
 #         datasrc 库落当日房型价——③ 对标侧数据来源）
-#       → 比价弹窗采集（安庆舍居民宿：打开→开始采集→对比表+最终比例→确认入队）
+#       → 比价弹窗打开（环节截图=弹窗帧）→ 比价计算验证（对比表：同 key
+#         取最低——投 999/1200 同名房只显 999；跨 key 取最大=最终比例；
+#         环节截图=弹窗对比表帧）→ 确认入队
 #       → 编辑覆盖验证（行上编辑 → 弹窗自动重采集 → 确认入队 → 仍待确认）
 #       → 确认推送（行上确认 → 状态待推送——不触发真实推送）
 #       → 数据库验证（calc_queue 同键恰 1 行、status=3、三比例非空、
@@ -178,7 +180,7 @@ steps:
     type: foreach
     in: ${var:claimed.data.tasks}
     item: task
-    expect: 每个认领到的任务提交一房一价（submit 同步落 datasrc 库——③ 对标侧数据就绪）
+    expect: 每个认领到的任务提交房型价（submit 同步落 datasrc 库——③ 对标侧数据就绪）。标准房双床房故意投 999/1200 两条同名房——验证弹窗「同 key 取最低」；房型名与信科字面一致 + meal 双早对齐早餐数（匹配前提）
     steps:
       - id: 提交房型价
         as: shop
@@ -192,6 +194,9 @@ steps:
             - room_name: 标准房双床房
               price: 999
               meal: 双早
+            - room_name: 标准房双床房
+              price: 1200
+              meal: 双早
             - room_name: 家庭房
               price: 899
               meal: 双早
@@ -199,9 +204,9 @@ steps:
         expectJson:
           code: 0
         expect: 提交 ${var:task.hotel_name} 的房型价
-  - id: 比价弹窗采集入队
+  - id: 比价弹窗打开
     type: flow
-    expect: ③页采集酒店弹窗：输名称→开始采集→对比表渲染（信科房型×对标价逐行比例+最终比例）→确认入队（2026-11-09 拍板的简化交互）
+    expect: ③页点「采集酒店」打开比价弹窗（Cookie 门禁先探测，通过才开）——一个按钮打开即采集的入口（2026-11-09 拍板交互）
     steps:
       - id: 打开算价队列页
         as: shop
@@ -216,12 +221,22 @@ steps:
         type: click
         selector: '#btn-collect'
         waitFor: '#collectdlg[open]'
-        expect: 打开比价弹窗（名称/入住离店日期已默认今天/明天）
+        expect: 打开比价弹窗（名称/入住离店日期已默认今天/明天——本地日期）
       - id: 填写瑞麟湾名称
         as: shop
         type: fill
         selector: '#collectForm input[name="xk_hotel_name"]'
         value: ${var:hotel}
+      - id: 弹窗表单就绪
+        as: shop
+        type: js_assert
+        script: '(() => { const dlg = document.getElementById("collectdlg"); if (!dlg.open) return false; const f = document.getElementById("collectForm"); return f.xk_hotel_name.value.includes("北京瑞麟湾") && !!f.check_in_date.value && !!f.check_out_date.value; })()'
+        truthy: true
+        expect: 弹窗打开、名称已填、入住/离店默认今天/明天（环节截图=弹窗帧）
+  - id: 比价计算验证
+    type: flow
+    expect: 开始采集→对比表验证老平台比价口径：同 key（房型+早餐）多条对标房取最低价（999/1200 只显 999）、跨 key 取最大为最终比例（自洽校验）
+    steps:
       - id: 开始采集
         as: shop
         type: click
@@ -233,7 +248,23 @@ steps:
         timeoutMs: 180000
         script: '(() => { const tbl = document.querySelector("#panel-ctrip table.tbl"); if (!tbl) return false; const fr = parseFloat(document.getElementById("finalRate").value); return !isNaN(fr); })()'
         truthy: true
-        expect: 携程对比表已渲染且最终比例非空（同 key 取最低携程价、跨 key 取最大比例——老平台口径）
+        expect: 携程对比表已渲染且最终比例非空（环节截图=弹窗对比表帧）
+      - id: 同key多条取最低价
+        as: shop
+        type: js_assert
+        script: '(() => { const vals = Array.from(document.querySelectorAll("#panel-ctrip .row-price")).map((i) => parseFloat(i.value)); if (vals.length !== 3) return false; return vals.filter((v) => v === 999).length === 2 && vals.filter((v) => v === 899).length === 1 && !vals.includes(1200); })()'
+        truthy: true
+        expect: 标准房双床房投了 999/1200 两条同名房——对比表该 key 两行都显最低的 999（1200 不出现），家庭房显 899——「同 key 取最低」直接证据
+      - id: 最终比例等于跨行最大
+        as: shop
+        type: js_assert
+        script: '(() => { const rates = Array.from(document.querySelectorAll("#panel-ctrip .row-rate")).map((td) => parseFloat((td.textContent || "").replace("%", ""))); const fr = parseFloat(document.getElementById("finalRate").value); if (!rates.length || isNaN(fr)) return false; return Math.abs(Math.max.apply(null, rates) - fr) < 0.01; })()'
+        truthy: true
+        expect: 最终比例 = 逐行比例的最大值（跨 key 取最大——老平台口径，界面值与 DB ctrip_rate 同源）
+  - id: 确认入队
+    type: flow
+    expect: 弹窗一个「确认入队」按钮落队（2026-11-09 拍板的简化交互终点）
+    steps:
       - id: 确认入队
         as: shop
         type: click
@@ -246,10 +277,10 @@ steps:
         timeoutMs: 60000
         script: '(() => { const rows = Array.from(document.querySelectorAll(".tbl tbody tr")); return rows.some((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("待确认")); })()'
         truthy: true
-        expect: 队列表出现 安庆舍居民宿 的待确认行
-  - id: 编辑覆盖验证
+        expect: 队列表出现 北京瑞麟湾 的待确认行
+  - id: 编辑重开弹窗采集
     type: flow
-    expect: 行上「编辑」=重开比价弹窗（打开即自动重采集）→确认入队→同键覆盖旧行仍待确认（2026-11-09 拍板：不作废，新的覆盖旧的）
+    expect: 行上「编辑」=重开比价弹窗（打开即自动重采集，等于采集酒店那个按钮——2026-11-09 拍板）
     steps:
       - id: 点行上编辑
         as: shop
@@ -263,8 +294,12 @@ steps:
         timeoutMs: 180000
         script: '(() => { const tbl = document.querySelector("#panel-ctrip table.tbl"); if (!tbl) return false; const fr = parseFloat(document.getElementById("finalRate").value); return !isNaN(fr); })()'
         truthy: true
-        expect: 重采集对比表再次渲染且比例算出
-      - id: 确认覆盖入队
+        expect: 重采集对比表再次渲染且比例算出（环节截图=弹窗对比表帧）
+  - id: 确认覆盖入队
+    type: flow
+    expect: 同键重新采集覆盖旧行（2026-11-09 拍板：不作废，新的覆盖旧的）
+    steps:
+      - id: 确认覆盖提交
         as: shop
         type: click
         selector: '#btn-enqueue'
