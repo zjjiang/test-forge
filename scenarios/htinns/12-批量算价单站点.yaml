@@ -1,0 +1,315 @@
+# 场景十二：价格维护 · ③ 算价——Excel 批量入队单站点（2026-11-09 定义）
+# 页面：/maintain/calc（③ 算价队列页「Excel 批量入队」弹窗）
+# 数据纪律：复用夹具店 shop 125 常驻真实酒店；对标价由 ② 链路 vendor 投喂
+#           （与场景 10 同款）；「不存在酒店」只验不落队列；失败行覆盖语义不累积
+# 拍板口径（2026-11-09）：
+#   ① 批量也单站点——跟随页面「比价站点」下拉（默认携程），选谁走谁
+#   ② 对标价走远端 datasrc price_by_hotel（爬虫库），没有该来源价即该来源失败
+#   ③ 算出的酒店入队待确认（携程比例，final=携程）；没算出的（信科侧失败/
+#      对标未命中）入队即「已失败」带原因——不再留全空比例假「采集中」行
+#   ④ Excel 未匹配本店配置的行只落任务 CSV，不落队列
+# 链路：基线登录 → 店内有货 → 爬虫库绑定 → 投喂瑞麟湾当日携程价（②链路）
+#       → 批量上传[瑞麟湾+不存在酒店] → 瑞麟湾入队待确认（携程比例非空）
+#       → DB 验证 batch 行恰 1 且无不存在的酒店 → 批量上传[安庆舍居民宿]
+#       （信科 0 房型）→ 行「已失败」带「信科侧失败」原因 → DB 验证失败行
+#       → 收尾保留酒店（当日数据留档，场景重跑覆盖自愈）
+name: 批量算价单站点
+module: 价格维护
+description: 对应用户场景 12；③算价 Excel 批量入队单站点——跟随比价站点下拉（默认携程），算出的入队待确认、没算出的（信科侧失败）直接已失败带原因、未匹配行不落队列，db 验证 batch 行与失败原因
+version: 1
+trace: false
+requires:
+  env: [RATEMAP_ASSETS, HTINNS_DB, DATASRC_URL, DATASRC_VENDOR_KEY]
+variables:
+  shopUser: "e2ebat_20261105160745"
+actors:
+  shop:
+    description: 夹具店铺身份（E2E-批量-1105-160745）
+    dialogs: accept
+steps:
+  - id: 店侧基线登录
+    type: flow
+    expect: 夹具店账号可正常登录（基线）
+    steps:
+      - id: 店铺账号打开登录页
+        as: shop
+        type: navigate
+        url: /login
+      - id: 店铺账号填写用户名
+        as: shop
+        type: fill
+        selector: 'input[name="username"]'
+        value: ${var:shopUser}
+      - id: 店铺账号填写密码
+        as: shop
+        type: fill
+        selector: 'input[name="password"]'
+        value: "123456"
+      - id: 店铺账号提交登录
+        as: shop
+        type: click
+        selector: 'form button[type="submit"]'
+      - id: 基线登录成功
+        as: shop
+        type: wait
+        selector: '.topbar .usermenu'
+  - id: 前置店内有货
+    type: flow
+    expect: 批量名单涉及的酒店常驻店内（瑞麟湾=成功案例；安庆舍居民宿=信科 0 房型失败案例）
+    steps:
+      - id: 打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 批量名单酒店在店
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const t = document.body.textContent; return t.includes("北京瑞麟湾温泉度假酒店") && t.includes("安庆舍居民宿"); })()'
+        truthy: true
+        expect: 瑞麟湾与安庆舍居民宿都在店内
+  - id: 前置爬虫库绑定
+    type: flow
+    expect: 瑞麟湾 POST datasrc hotel_mapping（upsert 幂等）——批量对标侧携程按名读价走该映射
+    steps:
+      - id: 绑定_北京瑞麟湾
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/hotel_mapping
+        json:
+          xk_hotel_name: 北京瑞麟湾温泉度假酒店
+          supplier_hotel_id: "50101524"
+          supplier_hotel_name: 北京瑞麟湾温泉度假酒店
+        expectStatus: 200
+        expectJson:
+          code: 0
+  - id: 前置投喂瑞麟湾当日携程价
+    type: flow
+    expect: ②页发起 vendor 任务（jasper）+ 模拟供应商 claim+submit——datasrc 库落当日房型价（与场景 10 同链路；批量对标价从这里读）
+    steps:
+      - id: 打开抓价执行页
+        as: shop
+        type: navigate
+        url: /maintain/crawl
+      - id: 等结果表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 点击批量上传
+        as: shop
+        type: click
+        selector: '#btn-launch'
+        waitFor: '#launchdlg[open]'
+      - id: 上传抓价Excel
+        as: shop
+        type: upload
+        selector: '#launchdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/crawl-hotels.xlsx
+      - id: 选择抓取供应商
+        as: shop
+        type: select
+        selector: '#launchdlg select[name="vendor_name"]'
+        label: 携程供应商jasper
+      - id: 提交发起
+        as: shop
+        type: click
+        selector: '#launchdlg button[type="submit"]'
+      - id: 等待派发完成
+        as: shop
+        type: wait
+        ms: 3000
+        expect: app 后台线程毫秒级 batch-create 完 vendor 任务
+      - id: 供应商认领任务
+        as: shop
+        type: http
+        method: GET
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/vendor/tasks?batch_size=50
+        headers:
+          X-Api-Key: ${var:DATASRC_VENDOR_KEY}
+        captureInto: claimed
+        expectStatus: 200
+        expectJson:
+          code: 0
+  - id: 供应商逐任务提交房型价
+    type: foreach
+    in: ${var:claimed.data.tasks}
+    item: task
+    expect: 每个认领到的任务提交房型价（submit 同步落 datasrc 库）。房型名与信科字面一致 + meal 双早对齐早餐数（匹配前提）
+    steps:
+      - id: 提交房型价
+        as: shop
+        type: http
+        method: POST
+        path: ${var:DATASRC_URL}/api/crawl/ctrip/vendor/tasks/${var:task.task_id}/submit
+        headers:
+          X-Api-Key: ${var:DATASRC_VENDOR_KEY}
+        json:
+          rooms:
+            - room_name: 标准房双床房
+              price: 999
+              display_price: "999"
+              meal: 双早
+            - room_name: 家庭房
+              price: 899
+              display_price: "899"
+              meal: 双早
+        expectStatus: 200
+        expectJson:
+          code: 0
+        expect: 提交 ${var:task.hotel_name} 的房型价
+  - id: 批量上传_成功与未匹配
+    type: flow
+    expect: ③页「Excel 批量入队」上传[瑞麟湾+不存在酒店]（站点跟随页面下拉=携程）→ 瑞麟湾入队待确认携程比例非空；不存在酒店只落任务 CSV 不落队列
+    steps:
+      - id: 打开算价队列页
+        as: shop
+        type: navigate
+        url: /maintain/calc
+      - id: 等队列表渲染
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 站点下拉默认携程
+        as: shop
+        type: js_assert
+        script: '(() => { const s = document.getElementById("collect-source"); return !!s && s.value === "ctrip" && s.options[s.selectedIndex].textContent === "携程"; })()'
+        truthy: true
+        expect: 页面「比价站点」下拉默认携程（批量跟随它）
+      - id: 点Excel批量入队
+        as: shop
+        type: click
+        selector: '#btn-batch'
+        waitFor: '#batchdlg[open]'
+        expect: 打开批量弹窗（Cookie 门禁先探测）
+      - id: 弹窗显示携程站点
+        as: shop
+        type: js_assert
+        script: '(() => { return document.getElementById("batchSourceLabel").textContent === "携程"; })()'
+        truthy: true
+        expect: 批量弹窗显示「比价站点：携程」（跟随下拉）
+      - id: 上传批量Excel
+        as: shop
+        type: upload
+        selector: '#batchdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/calc-batch-2.xlsx
+        expect: 名单[北京瑞麟湾温泉度假酒店 + 不存在的比价酒店XYZ]
+      - id: 提交批量任务
+        as: shop
+        type: click
+        selector: '#batchdlg button[type="submit"]'
+        expect: flash 任务已创建（后台 worker 逐家采集算价）
+      - id: 瑞麟湾批量行入队待确认
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 120000
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("待确认")); return !!tr; })()'
+        truthy: true
+        expect: 瑞麟湾行出现且状态待确认（后台批量完成；环节截图=batch 成功行）
+      - id: 行上携程比例非空
+        as: shop
+        type: js_assert
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("北京瑞麟湾温泉度假酒店") && r.textContent.includes("待确认")); if (!tr) return false; const td = tr.querySelectorAll("td"); return td.length > 7 && /[0-9]/.test(td[7].textContent); })()'
+        truthy: true
+        expect: 携程比例列有数值（999/899 投喂按信科底价算出比例）
+  - id: DB_成功路径验证
+    type: flow
+    expect: batch 行恰 1 条（瑞麟湾待确认带携程比例）；不存在的酒店不落队列
+    steps:
+      - id: DB_batch行恰1条带比例
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n, COALESCE(SUM(status=2),0) AS pending, COALESCE(SUM(ctrip_rate IS NOT NULL),0) AS with_rate FROM calc_queue WHERE shop_id=125 AND source=''batch'' AND xk_hotel_name=''北京瑞麟湾温泉度假酒店'' AND check_in_date>=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "1"
+          - column: pending
+            equals: "1"
+          - column: with_rate
+            equals: "1"
+        expect: 瑞麟湾 batch 行恰 1 条、待确认、携程比例非空（重跑覆盖不累积）
+      - id: DB_不存在酒店无行
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n FROM calc_queue WHERE shop_id=125 AND xk_hotel_name=''不存在的比价酒店XYZ'''
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "0"
+        expect: Excel 未匹配本店配置的行只落任务 CSV，不落队列
+  - id: 批量上传_信科失败直接失败
+    type: flow
+    expect: 上传[安庆舍居民宿]（信科 0 房型）→ 行直接「已失败」带「信科侧失败」原因——不再留全空比例假「采集中」行
+    steps:
+      - id: 点Excel批量入队
+        as: shop
+        type: click
+        selector: '#btn-batch'
+        waitFor: '#batchdlg[open]'
+      - id: 上传失败案例Excel
+        as: shop
+        type: upload
+        selector: '#batchdlg input[type="file"]'
+        path: ${var:RATEMAP_ASSETS}/calc-batch-fail.xlsx
+        expect: 名单[安庆舍居民宿]（信科页面 0 房型，真实数据）
+      - id: 提交批量任务
+        as: shop
+        type: click
+        selector: '#batchdlg button[type="submit"]'
+      - id: 行变已失败带信科原因
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 120000
+        script: '(() => { const tr = Array.from(document.querySelectorAll(".tbl tbody tr")).find((r) => r.textContent.includes("安庆舍居民宿")); return !!tr && tr.textContent.includes("已失败") && tr.textContent.includes("信科侧失败"); })()'
+        truthy: true
+        expect: 安庆舍居民宿行「已失败」+失败原因含「信科侧失败」（环节截图=失败行）
+  - id: DB_失败路径验证
+    type: flow
+    expect: 安庆舍居民宿 batch 行 status=6 且 error_msg 带信科侧失败原因
+    steps:
+      - id: DB_失败行带原因
+        as: shop
+        type: db
+        dsn: ${var:HTINNS_DB}
+        sql: 'SELECT COUNT(*) AS n, COALESCE(SUM(status=6),0) AS failed, COALESCE(SUM(error_msg LIKE ''%信科侧失败%''),0) AS with_reason, COALESCE(SUM(ctrip_rate IS NULL),0) AS no_rate FROM calc_queue WHERE shop_id=125 AND source=''batch'' AND xk_hotel_name=''安庆舍居民宿'' AND check_in_date>=CURDATE()'
+        minRows: 1
+        asserts:
+          - column: n
+            equals: "1"
+          - column: failed
+            equals: "1"
+          - column: with_reason
+            equals: "1"
+          - column: no_rate
+            equals: "1"
+        expect: 安庆舍居民宿 batch 行恰 1 条、已失败、原因含信科侧失败、无比例（重跑覆盖不累积）
+teardown:
+  - id: 收尾保留酒店
+    type: flow
+    expect: 夹具店酒店常驻不删；batch 行留档（覆盖语义不累积）；当日投喂价与场景 10 共用
+    steps:
+      - id: 收尾打开酒店管理页
+        as: shop
+        type: navigate
+        url: /hotels
+      - id: 收尾等列表加载
+        as: shop
+        type: wait
+        selector: '.tblwrap table.tbl'
+      - id: 收尾确认酒店仍在店
+        as: shop
+        type: js_assert
+        reload: true
+        timeoutMs: 60000
+        script: '(() => { const t = document.body.textContent; return t.includes("北京瑞麟湾温泉度假酒店") && t.includes("安庆舍居民宿"); })()'
+        truthy: true
