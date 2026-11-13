@@ -53,6 +53,16 @@ steps:
         as: shop
         type: wait
         selector: '.topbar .usermenu'
+  - id: 前置_信科Cookie有效闸
+    type: flow
+    expect: 批量算价的采集同样受 Cookie 门禁（信科拿底价再算比例）——过期时这里秒败并指明原因，不进 30s 超时连崩
+    steps:
+      - id: 信科Cookie有效前置闸
+        as: shop
+        type: js_assert
+        script: '(() => { const x = new XMLHttpRequest(); x.open("GET", "/api/xinke/check_cookie", false); x.send(); try { const d = JSON.parse(x.responseText); return d.code === 0 && d.data && d.data.valid === true; } catch (e) { return false; } })()'
+        truthy: true
+        expect: 本店信科 Cookie 有效——过期时本步快速失败（信科 PHPSESSID 有时效；请重新登录信科取值更新 XK_COOKIE 项目变量，勿排查代码）
   - id: 前置店内有货
     type: flow
     expect: 批量名单涉及的酒店常驻店内（瑞麟湾=成功案例；安庆舍居民宿=信科 0 房型失败案例）
